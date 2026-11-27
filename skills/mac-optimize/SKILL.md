@@ -28,7 +28,7 @@ top -l 1 -n 0 | head -12
 df -h / /System/Volumes/Data
 
 # 총 RAM 및 VM 통계
-sysctl hw.memsize | awk '{print "Total RAM: " $2/1024/1024/1024 " GB"}'
+echo "Total RAM: $(( $(sysctl -n hw.memsize) / 1073741824 )) GB"
 vm_stat | head -10
 sysctl vm.swapusage
 
