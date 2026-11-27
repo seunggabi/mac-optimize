@@ -19,6 +19,9 @@ A workflow that analyzes resource usage on macOS, cleans up unneeded files and s
 - **An old modification time does not mean unused**: a `.venv` or `node_modules` untouched for 30 days can still be executed every day. Even when the user approves deleting build output, leave out any repository that has a live process working in it (a terminal session, an IDE, a coding agent), or name those repositories and ask again.
 - **Record how to rebuild before removing**: "regenerable" is only true if the recipe exists. Before moving a virtualenv, save its Python version (`pyvenv.cfg`) and its package list to a file kept with the list of moved paths. Take the list with `uv pip freeze --python <venv>/bin/python`, or `<venv>/bin/python -m pip freeze` when uv is not installed (a virtualenv created by uv has no pip, so `<venv>/bin/pip` does not exist there). An empty list from a non-empty virtualenv means the command failed, not that nothing is installed. If there is no lock file or requirements file and the list cannot be taken, do not move it. In one real run a virtualenv with no requirements file could not be rebuilt at all, and two others came back at 14MB instead of 219MB because hand-installed packages were not recorded anywhere.
 - **Uninstall managed apps through their manager**: an app installed by JetBrains Toolbox, Homebrew, or a similar manager should be removed with that manager. Removing the bundle by hand leaves a dead entry in the manager, and the manager may delete the CLI launcher it generated (for example `/usr/local/bin/pycharm`).
+- **Opening a manager is an action**: a manager window can start work nobody asked for. Opening JetBrains Toolbox to uninstall one app started major-version update downloads for every installed IDE, and they restarted after being cancelled. Tell the user before opening one, check what it started, and report anything you could not stop.
+- **Keep the record outside `/tmp`**: write the list of moved paths and the rebuild recipes to `~/.mac-optimize/rebuild/<YYYYMMDD>/` as you go. A scratch directory under `/tmp` is emptied by the same reboot that empties the moved files, which leaves nothing to restore from.
+- **Admin rights come from a password dialog, and only for what the user picked**: `sudo` cannot read a password without a terminal. For an admin action the user chose in Phase 3, write the commands to a script and run it with `osascript -e 'do shell script "<script>" with prompt "<what and why>" with administrator privileges'`. Never use the dialog for anything the user did not pick.
 
 ## Workflow
 
@@ -37,6 +40,8 @@ df -h / /System/Volumes/Data
 echo "Total RAM: $(( $(sysctl -n hw.memsize) / 1073741824 )) GB"
 vm_stat | head -10
 sysctl vm.swapusage
+memory_pressure | tail -1
+vm_stat | grep -E "Anonymous|File-backed|occupied by compressor"   # app memory / file cache / compressed
 
 # Top memory processes (-m sorts by memory; -r would sort by CPU)
 ps -eo pid,rss,comm -m | head -20
@@ -61,7 +66,7 @@ launchctl list | grep -v "com.apple" | grep -v "^\-" | head -30
 
 Summarize the diagnosis for the user as tables:
 - CPU: idle %, load average
-- Memory: total, used, compressor size, swap used
+- Memory: total, app memory (anonymous pages), file cache (file-backed pages), compressor size, swap used, free percentage from `memory_pressure`. "Used" in `top` includes the file cache, which macOS gives back on demand: 24GB "used" on a 32GB machine was 7.8GB of cache with pressure normal. Call memory a problem only when the free percentage is low or swap is growing
 - Disk: total, used, free
 - Top 5 resource consumers
 - Largest caches
@@ -93,12 +98,15 @@ Notes:
 - Do not run brew commands (they collide with Team 2's upgrade lock; Team 2 runs cleanup after the upgrade)
 - Move app caches (`Cache`, `Code Cache`, `GPUCache`, `Service Worker/CacheStorage`) only when the app is not running (check with `ps -eo comm`)
 - Before calling something an "old version cache", check whether the app is installed (`/Applications`, `~/Applications`). The cache of an installed version is not old
+- For the uv cache use `uv cache prune` (unused entries only). `uv cache clean` removes environments that a running `uvx` tool is executing from
+- `find` may reject relative dates: where `find` is `bfs`, `-newermt "3 days ago"` fails with "Invalid timestamp". Pass an absolute time (`-newermt "2026-11-25 04:43:00"`) and do not send stderr to `/dev/null` on a test that decides what gets moved: a failed test reads as "nothing recent"
 
 #### Team 2: brew-updater (Homebrew)
 
 Tasks:
 - List with `HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --formula` and `--cask`
-- Build the upgrade list: take the names from `brew outdated --formula`, drop every major version change and every formula that appears in `brew services list`. Run `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --formula <names>` with that explicit list. If the list is empty, do not run upgrade at all
+- Build the upgrade list: take the names from `brew outdated --formula`, drop every major version change, every formula that appears in `brew services list`, every language runtime a running process executes from (`ps -eo comm | grep Cellar`), and every formula such a runtime links against (`brew deps <runtime>`). Run `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --formula --dry-run <names>` and drop anything that would build from source or pull a dropped formula along. Then run `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --formula <names>` with that explicit list. If the list is empty, do not run upgrade at all
+- If `brew doctor` says the macOS version is no longer supported, expect almost nothing to upgrade: bottles are not built for it, so nearly every formula is a source build. Report that as the cause instead of forcing the builds (in one run 1 of 73 outdated formulae was upgradable)
 - Run `HOMEBREW_NO_AUTO_UPDATE=1 brew autoremove --dry-run` first. Run the real `brew autoremove` only if the dry-run list holds nothing the user would call directly (runtimes, databases, CLIs); otherwise report the list
 - Run `HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup --prune=all` (also clears the download cache)
 - Diagnose with `HOMEBREW_NO_AUTO_UPDATE=1 brew doctor` and report the findings. Fix none of them
@@ -117,12 +125,15 @@ Tasks:
 - Check for abnormal CPU use by FortiClient and similar (report only)
 - Check services that are not running (Nginx, Docker, and so on)
 - Aggregate long-running processes: count, total memory, and uptime per process name (`ps -eo pid,rss,etime,comm`). Dozens of terminal sessions or IDE windows often pile up and hold memory
+- Group coding-agent sessions by their root process (`ps -eo pid,ppid,rss,etime,command`, then walk the parent links). Each session starts its own set of MCP servers, so `npm` and `node` rows that look like orphans usually belong to a live session: in one run 56 of them belonged to 7 sessions, about 1GB per session. Report per session: root PID, working directory (`lsof -a -p <pid> -d cwd -Fn`), uptime, child count, total memory. Flag as orphans only processes whose parent is PID 1
+- Docker Desktop: report the container count (`docker ps -q | wc -l`) and the memory of its processes including the VM (`com.apple.Virtualization.VirtualMachine`). Prove the VM is Docker's with `lsof -p <pid> | grep Docker.raw`, because other apps run VMs under the same process name
 - Find dead auto-start items: for each LaunchAgents and LaunchDaemons plist, read the executable with `plutil -extract ProgramArguments.0 raw <plist>` and, if that key is missing, `plutil -extract Program raw <plist>`. Flag the plist as dead only when a path was read and that file does not exist. If neither key can be read, say "cannot tell". Skip every plist that matches the security-software keywords. Report only; items under `/Library` need admin rights to remove
 
 Notes:
 - Only list user processes (terminal sessions, IDEs, and so on); end them only when the user asks. Before ending one, check that its child processes have no work in progress, and use `kill -TERM` (never `-KILL`)
 - Never change security software (Fortinet, AhnLab, Jiran, PNPSecure, Wizvera, CrossEx, and so on)
 - Keep databases the user may want, such as MySQL, by default
+- Match processes by executable (`ps -eo comm | grep -i <name>`), not by full command line. `pgrep -f zoom` matched an Electron app whose arguments contain `popoutZoom`, and `pgrep -f android` matched `androidEmulator` in the same arguments
 
 #### Team 4: disk-analyzer (disk space)
 
@@ -132,8 +143,10 @@ Tasks:
 - Docker status (`docker system df`). Clean only when the user asks, with `docker system prune -a`; ask separately about volumes because they may hold database data
 - Size of `/tmp$HOME` (items moved by earlier runs may have piled up)
 - Size of the user temp and cache directories under `/private/var/folders` (`getconf DARWIN_USER_TEMP_DIR`, `DARWIN_USER_CACHE_DIR`)
-- Size and last-used date per app (`mdls -raw -name kMDItemLastUsedDate <app>`). Flag apps installed twice and large apps unused for more than 180 days (list only, do not delete)
+- Size and last-used date per app (`mdls -raw -name kMDItemLastUsedDate <app>`). Flag apps installed twice and large apps unused for more than 180 days (list only, do not delete). `mdls` often returns nothing (it did for every app but Safari in one run). Fall back to the access time of the main executable (`stat -f %Sa "<app>/Contents/MacOS/<name>"`) and the modification time of the app's preferences file, and label the date as an estimate
 - Regenerable build output untouched for more than 30 days: `node_modules`, `.venv`, `build`, `.terraform/providers` (list only, do not delete)
+- Virtualenvs whose interpreter is gone: `bin/python` is a symlink whose target does not exist (`[ -L <venv>/bin/python ] && [ ! -e <venv>/bin/python ]`), typically after a Homebrew Python was removed. They cannot run, so list them first as the lowest-risk candidates. Their package list can still be read from the `*.dist-info` directory names in `site-packages`
+- For a `*.code_sign_clone` directory, report the `du` figure and say it is not reclaimable. In one run `du` showed 66.6GB for 52 clones that would free about 1.3GB
 - Developer tool data: installs in `~/.npm/_npx` older than 30 days, versions in `~/.local/share/claude/versions` that are neither the link target nor running, tool folders left behind without their app (`~/.codeium` and the like), runtimes installed several times (JDK, Python)
 - Large `.git` directories
 - Large disposable files such as Java hprof crash dumps
@@ -143,7 +156,9 @@ Tasks:
 
 Tasks:
 - List macOS software updates with `softwareupdate -l` (list only, do not install)
-- Verify the volume with `diskutil verifyVolume /`
+- Verify both volumes: `diskutil verifyVolume /` checks only the sealed System volume, so also run `diskutil verifyVolume /System/Volumes/Data` for the user's data. Run them last (minutes, brief I/O stalls). A live check can print "found to be corrupt", then "appears to be OK" with exit code 0 and "A repair action has been taken": quote the lines as they are, and recommend First Aid from Recovery before an OS update instead of calling the volume healthy or broken
+- Backup and firewall: `tmutil destinationinfo` ("No destinations configured" means no backup; say so before recommending an OS update) and `/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate`
+- Plaintext secrets in shell startup files: `grep -n -i -E "(token|secret|api_?key|password)[A-Z_]*=" ~/.zshrc ~/.zshenv ~/.zprofile`. Report the file, line number, and variable name only. Never print the value, and mask it in any output you show
 - Uptime: `uptime` (swap is not cleared when the machine runs for a long time without a reboot)
 - `.DS_Store` files (first level of the home directory only)
 - Trash size: `du -sh ~/.Trash/ 2>/dev/null`
@@ -165,14 +180,21 @@ After the agents finish:
 1. **Java hprof files**: find them with `find ~ -maxdepth 1 -name 'java_error_in_*.hprof'` and move them to `/tmp/` (JVM crash dumps, safe to delete)
 2. **brew upgrade lock conflicts**: if a package failed on a lock, report it and the PID holding the lock (`pgrep -x brew`). Do not kill it
 3. **Trash**: if the Trash is large, recommend emptying it (do not empty it automatically)
-4. **Decisions for the user**: show the lists the agents only reported (running services, Docker, stale build output, unused apps, duplicate runtimes) in one question and ask which to act on. Act only on what they pick, and apply the principles above (skip repositories with a live process; remove managed apps through their manager)
+4. **Decisions for the user**: show the lists the agents only reported (running services, Docker, idle coding-agent sessions, stale build output, unused apps, duplicate runtimes, dead auto-start items, keychain leftovers) in one question and ask which to act on. Act only on what they pick, and apply the principles above (skip repositories with a live process; remove managed apps through their manager). How to carry out the common picks:
+   - **Docker images**: `docker image prune -a --filter "until=720h" -f` keeps images newer than 30 days. Never add `--volumes` and never run `docker volume prune`
+   - **Docker Desktop**: quit it only when no container is running, then verify (see "Quitting Docker Desktop" below)
+   - **Idle agent sessions**: confirm the session has no child other than its MCP servers, send `kill -TERM` to the session root, and check that the children exited. Leave sessions started within the last day unless the user names them
+   - **A service**: for Redis run `redis-cli save` first, then `brew services stop redis`
+   - **Dead auto-start items under `/Library`**: check that the app is absent and nothing of it is running, `launchctl bootout system/<label>` for a loaded item, then move the plist and its helper in `/Library/PrivilegedHelperTools` to `/tmp/Library/...` through the password dialog. A dead login item is removed with `osascript -e 'tell application "System Events" to delete login item "<name>"'`
+   - **Keychain leftovers**: list names and dates only with `security dump-keychain` (never `-d`, which prints secrets). Offer entries of apps that are no longer installed; put everything else under "confirm". Delete only what the user picks, with `security delete-generic-password -s <service> -a <account>` or `delete-internet-password -s <server>`. Items in the System keychain need admin rights. Saved Wi-Fi passwords are removed from the known-networks list in System Settings, not from the keychain
+   - **A plaintext secret**: ask whether it is still used. If not, delete the line and tell the user to revoke the token at the provider. Check the edited file with `zsh -n` before replacing the original, and keep no backup copy that still holds the secret
 5. **Items moved to `/tmp`**: `/tmp` is on the same volume, so moving alone does not increase free space. Report the moved size and the "real free space gained" (difference in `df` before and after) separately, and ask the user whether to empty them. When they approve, delete only the exact paths this run moved, one by one from the recorded list, and leave everything else under `/tmp$HOME` alone
 6. **sudo commands**: give the user the DNS flush and `purge` command to run themselves
    `sudo purge && sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`
 7. **macOS updates**: report the list and highlight security updates. Re-measure swap after the cleanup before recommending a restart: swap can drop on its own once memory pressure eases (10GB to under 1GB in one real run), so recommend a restart for swap only if it is still high
 8. **Post-check**: confirm nothing the user relies on broke.
    - Development commands still resolve: `for c in python3 node git docker java; do command -v $c >/dev/null || echo "missing: $c"; done`
-   - CLI launchers do not point at a removed app: `find /usr/local/bin -maxdepth 1 -type f -exec grep -l "\.app/" {} +` and check that each referenced path exists (use `find`, because a glob with no match is an error in zsh)
+   - CLI launchers do not point at a removed app: `find /usr/local/bin -maxdepth 1 -type f -exec grep -l "\.app/" {} +` and check that each referenced path exists (use `find`, because a glob with no match is an error in zsh). Launchers are often symlinks, which `-type f` skips, so also list broken ones: `find /usr/local/bin -maxdepth 1 -type l ! -exec test -e {} \; -print`
    - Removed build output does not sit in a directory where a process is working: compare the removed paths with `lsof -a -p <pid> -d cwd -Fn` of terminal, IDE, and agent processes, and report any overlap
    - Apps whose caches were removed still start. Ask the user first, because this opens apps on their screen. For each app that is not already running: `open -g -j -a "<app>"`, wait about 25 seconds, check that the process is alive and that no new file for it appeared in `~/Library/Logs/DiagnosticReports`, then quit it with `osascript -e 'tell application "<app>" to quit'`. Skip an app that is already running. If an app does not quit (an open dialog), leave it running and tell the user; never force-quit
 9. **Re-setup list**: for everything removed, tell the user what they need to run before using it again (`terraform init`, `npm install`, recreate the virtualenv, re-pull Docker images, cold-boot the emulator)
@@ -256,6 +278,42 @@ T="101 102 103"; for p in $T; do kill -TERM $p; done   # loops once and fails
 # Build the running list once first, then compare against it
 RUN=$(ps -eo command | grep -v grep | grep -o "_npx/[a-f0-9]\{8,\}" | sort -u)
 case "$RUN" in *"$h"*) echo "skip $h";; esac
+```
+
+### Checking that something exists in zsh
+```bash
+# A glob with no match aborts the whole command, so `ls /Applications/Foo* /Applications/Bar.app`
+# prints an error and checks nothing. Test each path on its own
+for a in "zoom.us.app" "Charles.app"; do
+  for d in /Applications "$HOME/Applications"; do [ -e "$d/$a" ] && echo "installed: $d/$a"; done
+done
+```
+
+### Quitting Docker Desktop
+```bash
+# Only when no container is running
+[ "$(docker ps -q | wc -l)" -eq 0 ] && osascript -e 'tell application "Docker" to quit'
+
+# Verify after 30 seconds. The quit request can be ignored: in one run the engine restarted twice
+# instead, and the VM grew from 1.6GB to 8.5GB
+ps -eo pid,rss,comm | grep -E "Docker.app|com.docker|Virtualization.VirtualMachine"
+
+# Still there: end the main process (parent PID 1) with TERM, never KILL, and check again.
+# A `docker serve` or `com.docker.dev-envs` helper can be left behind with parent PID 1
+kill -TERM "$(pgrep -x Docker | head -1)"
+```
+
+### Admin action through the password dialog (only for what the user picked)
+```bash
+# Put the commands in a script, then let macOS ask for the password
+cat > "$HOME/.mac-optimize/rebuild/$(date +%Y%m%d)/admin.sh" <<'EOF'
+#!/bin/sh
+mkdir -p /tmp/Library/LaunchDaemons
+launchctl bootout system/com.example.dead 2>&1 || true
+mv /Library/LaunchDaemons/com.example.dead.plist /tmp/Library/LaunchDaemons/
+EOF
+chmod 755 "$HOME/.mac-optimize/rebuild/$(date +%Y%m%d)/admin.sh"
+osascript -e "do shell script \"$HOME/.mac-optimize/rebuild/$(date +%Y%m%d)/admin.sh\" with prompt \"Move the dead auto-start items to /tmp\" with administrator privileges"
 ```
 
 ### brew commands
