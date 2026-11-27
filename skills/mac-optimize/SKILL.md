@@ -132,6 +132,7 @@ launchctl list | grep -v "com.apple" | grep -v "^\-" | head -30
 - `/private/var/folders` 의 사용자 임시·캐시 폴더 크기 확인 (`getconf DARWIN_USER_TEMP_DIR`, `DARWIN_USER_CACHE_DIR`)
 - 앱별 크기와 마지막 사용일 (`mdls -raw -name kMDItemLastUsedDate <앱>`). 같은 앱이 두 벌 있거나 180일 넘게 안 쓴 큰 앱을 표시 (삭제하지 않고 목록만)
 - 재생성 가능한 산출물 중 30일 넘게 안 건드린 것 목록: `node_modules`, `.venv`, `build`, `.terraform/providers` (삭제하지 않고 목록만)
+- 개발 도구 데이터: `~/.npm/_npx` 의 30일 넘은 설치본, `~/.local/share/claude/versions` 에서 링크 대상도 실행 중도 아닌 버전, 앱이 없는데 남은 도구 폴더(`~/.codeium` 등), 여러 벌 깔린 런타임(JDK, Python) 목록
 - `node_modules` 목록 (삭제하지 않고 목록만)
 - 큰 `.git` 디렉토리 확인
 - Java hprof 크래시 덤프 등 불필요 대용량 파일 식별
@@ -228,6 +229,14 @@ mv ~/some/path "/tmp$HOME/some/path_$(date +%Y%m%d_%H%M%S)"
 # zsh 는 $VAR 를 단어 분리하지 않는다. 목록은 배열로 쓴다
 T=(101 102 103); for p in $T; do kill -TERM $p; done   # 맞음
 T="101 102 103"; for p in $T; do kill -TERM $p; done   # 한 번만 돌고 실패
+```
+
+### 실행 중 여부 확인
+```bash
+# 반복문 안에서 ps | grep "$이름" 을 쓰면 grep 자신이 걸려 전부 "실행 중"으로 나온다.
+# 실행 중 목록을 먼저 한 번 만들고 그 목록과 비교한다
+RUN=$(ps -eo command | grep -v grep | grep -o "_npx/[a-f0-9]\{8,\}" | sort -u)
+case "$RUN" in *"$h"*) echo "skip $h";; esac
 ```
 
 ### brew 명령 패턴
