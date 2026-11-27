@@ -34,7 +34,7 @@ It also triggers on phrases like "mac is slow", "disk cleanup", or "system check
 | Phase 1 | Diagnose CPU, memory, swap, disk, caches, and auto-start items |
 | Phase 2 | Run 5 agents in parallel |
 | Phase 3 | Collect results, report items moved to `/tmp` and commands that need sudo |
-| Phase 4 | Final Before → After report |
+| Phase 4 | Final Before → After report with a 100-point score |
 
 | Agent | Job |
 |---|---|
@@ -48,7 +48,7 @@ It also triggers on phrases like "mac is slow", "disk cleanup", or "system check
 
 - Never uses `rm -rf`. It runs a cache manager's own command or moves the target to `/tmp$HOME/...`.
 - Never touches security software (VPN, antivirus, DLP, certificate tools).
-- Does not run `sudo`, install macOS updates, upgrade casks, stop services, prune Docker, or end processes on its own. It lists them and acts only on what you pick. An admin action you picked runs through a macOS password dialog.
+- Does not run `sudo`, install macOS updates, upgrade casks, stop services, prune Docker, or end processes on its own. It lists them and acts only on what you pick. An admin action you picked runs through a macOS password dialog, after it shows you the script. A plaintext secret is reported with its value masked.
 - Keeps the list of moved paths and the rebuild recipes in `~/.mac-optimize/rebuild/<date>/`, so they survive the reboot that empties `/tmp`.
 - `/tmp` is on the same volume, so moving files there does not free space. It asks before emptying it.
 - Free space is verified with `df`, because a `du` figure is not always reclaimable (APFS clones).

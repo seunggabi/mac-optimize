@@ -21,7 +21,7 @@ A workflow that analyzes resource usage on macOS, cleans up unneeded files and s
 - **Uninstall managed apps through their manager**: an app installed by JetBrains Toolbox, Homebrew, or a similar manager should be removed with that manager. Removing the bundle by hand leaves a dead entry in the manager, and the manager may delete the CLI launcher it generated (for example `/usr/local/bin/pycharm`).
 - **Opening a manager is an action**: a manager window can start work nobody asked for. Opening JetBrains Toolbox to uninstall one app started major-version update downloads for every installed IDE, and they restarted after being cancelled. Tell the user before opening one, check what it started, and report anything you could not stop.
 - **Keep the record outside `/tmp`**: write the list of moved paths and the rebuild recipes to `~/.mac-optimize/rebuild/<YYYYMMDD>/` as you go. A scratch directory under `/tmp` is emptied by the same reboot that empties the moved files, which leaves nothing to restore from.
-- **Admin rights come from a password dialog, and only for what the user picked**: `sudo` cannot read a password without a terminal. For an admin action the user chose in Phase 3, write the commands to a script and run it with `osascript -e 'do shell script "<script>" with prompt "<what and why>" with administrator privileges'`. Never use the dialog for anything the user did not pick.
+- **Admin rights come from a password dialog, and only for what the user picked**: `sudo` cannot read a password without a terminal. For an admin action the user chose in Phase 3, write the commands to a script, show the user the script, and then run it with `osascript -e 'do shell script "<script>" with prompt "<what and why>" with administrator privileges'`. Never use the dialog for anything the user did not pick. Phase 2 agents never use the dialog, and the commands in the "sudo commands" step stay with the user.
 
 ## Workflow
 
@@ -99,7 +99,7 @@ Notes:
 - Move app caches (`Cache`, `Code Cache`, `GPUCache`, `Service Worker/CacheStorage`) only when the app is not running (check with `ps -eo comm`)
 - Before calling something an "old version cache", check whether the app is installed (`/Applications`, `~/Applications`). The cache of an installed version is not old
 - For the uv cache use `uv cache prune` (unused entries only). `uv cache clean` removes environments that a running `uvx` tool is executing from
-- `find` may reject relative dates: where `find` is `bfs`, `-newermt "3 days ago"` fails with "Invalid timestamp". Pass an absolute time (`-newermt "2026-11-25 04:43:00"`) and do not send stderr to `/dev/null` on a test that decides what gets moved: a failed test reads as "nothing recent"
+- `find` may reject relative dates: where `find` is `bfs`, `-newermt "3 days ago"` fails with "Invalid timestamp" (`/usr/bin/find` accepted both forms). Pass an absolute time (`-newermt "$(date -v-3d '+%Y-%m-%d %H:%M:%S')"`) and do not send stderr to `/dev/null` on a test that decides what gets moved: a failed test reads as "nothing recent"
 
 #### Team 2: brew-updater (Homebrew)
 
@@ -125,9 +125,10 @@ Tasks:
 - Check for abnormal CPU use by FortiClient and similar (report only)
 - Check services that are not running (Nginx, Docker, and so on)
 - Aggregate long-running processes: count, total memory, and uptime per process name (`ps -eo pid,rss,etime,comm`). Dozens of terminal sessions or IDE windows often pile up and hold memory
-- Group coding-agent sessions by their root process (`ps -eo pid,ppid,rss,etime,command`, then walk the parent links). Each session starts its own set of MCP servers, so `npm` and `node` rows that look like orphans usually belong to a live session: in one run 56 of them belonged to 7 sessions, about 1GB per session. Report per session: root PID, working directory (`lsof -a -p <pid> -d cwd -Fn`), uptime, child count, total memory. Flag as orphans only processes whose parent is PID 1
+- Group coding-agent sessions by their root process (`ps -eo pid,ppid,rss,etime,command`, then walk the parent links). Each session starts its own set of MCP servers, so `npm` and `node` rows that look like orphans usually belong to a live session: in one run 56 of them belonged to 7 sessions, about 1GB per session. Report per session: root PID, working directory (`lsof -a -p <pid> -d cwd -Fn`), uptime, child count, total memory. List every session on its own row, not as a total. Mark the session running this skill and its ancestors as "this session" (walk up the parent links from the current shell's PID with `ps -o ppid= -p <pid>`): it is never ended. "Idle" is the user's call: a session that is waiting for user input looks the same as an abandoned one, so the user decides from the working directory and uptime. Flag as orphans only processes whose parent is PID 1
 - Docker Desktop: report the container count (`docker ps -q | wc -l`) and the memory of its processes including the VM (`com.apple.Virtualization.VirtualMachine`). Prove the VM is Docker's with `lsof -p <pid> | grep Docker.raw`, because other apps run VMs under the same process name
 - Find dead auto-start items: for each LaunchAgents and LaunchDaemons plist, read the executable with `plutil -extract ProgramArguments.0 raw <plist>` and, if that key is missing, `plutil -extract Program raw <plist>`. Flag the plist as dead only when a path was read and that file does not exist. If neither key can be read, say "cannot tell". Skip every plist that matches the security-software keywords. Report only; items under `/Library` need admin rights to remove
+- Before calling a leftover directory "empty", count its entries (`ls -A <dir> | wc -l`), not its `du` size. A `/opt/homebrew/var/mongodb` reported as empty held 24 database files. A data directory is never moved
 
 Notes:
 - Only list user processes (terminal sessions, IDEs, and so on); end them only when the user asks. Before ending one, check that its child processes have no work in progress, and use `kill -TERM` (never `-KILL`)
@@ -140,10 +141,10 @@ Notes:
 Tasks:
 - Top 15 of the home directory with `du -sh ~/*`
 - Large directories inside `~/Library`
-- Docker status (`docker system df`). Clean only when the user asks, with `docker system prune -a`; ask separately about volumes because they may hold database data
+- Docker status (`docker system df`). Report only: cleaning is decided in Phase 3. Report volumes separately because they may hold database data
 - Size of `/tmp$HOME` (items moved by earlier runs may have piled up)
 - Size of the user temp and cache directories under `/private/var/folders` (`getconf DARWIN_USER_TEMP_DIR`, `DARWIN_USER_CACHE_DIR`)
-- Size and last-used date per app (`mdls -raw -name kMDItemLastUsedDate <app>`). Flag apps installed twice and large apps unused for more than 180 days (list only, do not delete). `mdls` often returns nothing (it did for every app but Safari in one run). Fall back to the access time of the main executable (`stat -f %Sa "<app>/Contents/MacOS/<name>"`) and the modification time of the app's preferences file, and label the date as an estimate
+- Size and last-used date per app (`mdls -raw -name kMDItemLastUsedDate <app>`). Flag apps installed twice and large apps unused for more than 180 days (list only, do not delete). `mdls` often has no date: it prints `(null)` or "could not find kMDItemLastUsedDate" rather than nothing (it did for every app but Safari in one run). Fall back to the access time of the main executable (`stat -f %Sa "<app>/Contents/MacOS/<name>"`, with `<name>` from `defaults read "<app>/Contents/Info.plist" CFBundleExecutable`) and the modification time of the app's preferences file, and label the date as an estimate. Leave sealed-volume apps such as Safari out of the access-time fallback: Safari's access time read 2024 against an `mdls` date of 2026-05
 - Regenerable build output untouched for more than 30 days: `node_modules`, `.venv`, `build`, `.terraform/providers` (list only, do not delete)
 - Virtualenvs whose interpreter is gone: `bin/python` is a symlink whose target does not exist (`[ -L <venv>/bin/python ] && [ ! -e <venv>/bin/python ]`), typically after a Homebrew Python was removed. They cannot run, so list them first as the lowest-risk candidates. Their package list can still be read from the `*.dist-info` directory names in `site-packages`
 - For a `*.code_sign_clone` directory, report the `du` figure and say it is not reclaimable. In one run `du` showed 66.6GB for 52 clones that would free about 1.3GB
@@ -158,7 +159,8 @@ Tasks:
 - List macOS software updates with `softwareupdate -l` (list only, do not install)
 - Verify both volumes: `diskutil verifyVolume /` checks only the sealed System volume, so also run `diskutil verifyVolume /System/Volumes/Data` for the user's data. Run them last (minutes, brief I/O stalls). A live check can print "found to be corrupt", then "appears to be OK" with exit code 0 and "A repair action has been taken": quote the lines as they are, and recommend First Aid from Recovery before an OS update instead of calling the volume healthy or broken
 - Backup and firewall: `tmutil destinationinfo` ("No destinations configured" means no backup; say so before recommending an OS update) and `/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate`
-- Plaintext secrets in shell startup files: `grep -n -i -E "(token|secret|api_?key|password)[A-Z_]*=" ~/.zshrc ~/.zshenv ~/.zprofile`. Report the file, line number, and variable name only. Never print the value, and mask it in any output you show
+- Automatic-update settings and stealth mode: `for k in AutomaticCheckEnabled AutomaticDownload CriticalUpdateInstall ConfigDataInstall; do defaults read /Library/Preferences/com.apple.SoftwareUpdate "$k"; done` (1 means on; report only) and `/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode`. Read the values before offering to turn anything on: in one run all four were already on
+- Plaintext secrets in shell startup files: `grep -n -i -E "(token|secret|api_?key|password)[A-Z_]*=" ~/.zshrc ~/.zshenv ~/.zprofile 2>/dev/null | sed -E 's/=.*/=<masked>/'`. The `sed` masks the value before it is printed; never run the `grep` without it. Report the file, line number, and variable name only. Never print the value
 - Uptime: `uptime` (swap is not cleared when the machine runs for a long time without a reboot)
 - `.DS_Store` files (first level of the home directory only)
 - Trash size: `du -sh ~/.Trash/ 2>/dev/null`
@@ -180,18 +182,20 @@ After the agents finish:
 1. **Java hprof files**: find them with `find ~ -maxdepth 1 -name 'java_error_in_*.hprof'` and move them to `/tmp/` (JVM crash dumps, safe to delete)
 2. **brew upgrade lock conflicts**: if a package failed on a lock, report it and the PID holding the lock (`pgrep -x brew`). Do not kill it
 3. **Trash**: if the Trash is large, recommend emptying it (do not empty it automatically)
-4. **Decisions for the user**: show the lists the agents only reported (running services, Docker, idle coding-agent sessions, stale build output, unused apps, duplicate runtimes, dead auto-start items, keychain leftovers) in one question and ask which to act on. Act only on what they pick, and apply the principles above (skip repositories with a live process; remove managed apps through their manager). How to carry out the common picks:
-   - **Docker images**: `docker image prune -a --filter "until=720h" -f` keeps images newer than 30 days. Never add `--volumes` and never run `docker volume prune`
+4. **Decisions for the user**: show the lists the agents only reported (running services, Docker, idle coding-agent sessions, stale build output, unused apps, duplicate runtimes, dead auto-start items, plaintext secrets) in one question and ask which to act on. No team collects keychain leftovers: Phase 3 collects that list itself, and only when the user asks for it. Act only on what they pick, and apply the principles above (skip repositories with a live process; remove managed apps through their manager). How to carry out the common picks:
+   - **Docker images**: `docker image prune -a --filter "until=720h" -f` removes unused images created more than 30 days ago. `until` filters on the creation date, not the pull date, so an old image pulled today is removed too; such images need a re-pull or rebuild. Never add `--volumes` and never run `docker volume prune`
    - **Docker Desktop**: quit it only when no container is running, then verify (see "Quitting Docker Desktop" below)
-   - **Idle agent sessions**: confirm the session has no child other than its MCP servers, send `kill -TERM` to the session root, and check that the children exited. Leave sessions started within the last day unless the user names them
+   - **Idle agent sessions**: "idle" is the user's call. Show each session on its own row with its working directory and uptime, and end only the root PIDs the user names. Never the session running this skill or its ancestors (walk up the parent links from the current shell's PID). A session waiting for user input also has no child other than its MCP servers, so that check does not prove a session is abandoned. For a named session, confirm it has no child other than its MCP servers, send `kill -TERM` to the session root, and check that the children exited. Leave sessions started within the last day unless the user names them
+   - **Before any signal**: re-check that the PID still exists and is still the same command (`ps -o command= -p <pid>`) right before sending it. Sessions listed minutes earlier can be gone or replaced (two were, in one run)
    - **A service**: for Redis run `redis-cli save` first, then `brew services stop redis`
-   - **Dead auto-start items under `/Library`**: check that the app is absent and nothing of it is running, `launchctl bootout system/<label>` for a loaded item, then move the plist and its helper in `/Library/PrivilegedHelperTools` to `/tmp/Library/...` through the password dialog. A dead login item is removed with `osascript -e 'tell application "System Events" to delete login item "<name>"'`
-   - **Keychain leftovers**: list names and dates only with `security dump-keychain` (never `-d`, which prints secrets). Offer entries of apps that are no longer installed; put everything else under "confirm". Delete only what the user picks, with `security delete-generic-password -s <service> -a <account>` or `delete-internet-password -s <server>`. Items in the System keychain need admin rights. Saved Wi-Fi passwords are removed from the known-networks list in System Settings, not from the keychain
-   - **A plaintext secret**: ask whether it is still used. If not, delete the line and tell the user to revoke the token at the provider. Check the edited file with `zsh -n` before replacing the original, and keep no backup copy that still holds the secret
+   - **Dead auto-start items under `/Library`**: check that the app is absent and nothing of it is running, `launchctl bootout system/<label>` for a loaded item, then move the plist and its helper in `/Library/PrivilegedHelperTools` to `/tmp/Library/...` through the password dialog. A dead login item is removed with `osascript -e 'tell application "System Events" to delete login item "<name>"'`. `/usr/local/bin` is usually owned by root, so broken launcher symlinks are moved to `/tmp/usr/local/bin/` through the password dialog too, and only links that are both `-L` and not `-e` (`[ -L <link> ] && [ ! -e <link> ]`)
+   - **A tap of the user's own that brew reports as untrusted**: `brew trust <user>/<tap>`, only for a tap the user owns and picks. Never trust a third-party tap. In one run every `brew outdated` call printed "Refusing to load ... from untrusted tap" until this was done
+   - **Keychain leftovers**: list names and dates only with `security dump-keychain | grep -E '"(svce|srvr|acct|mdat)"|^keychain:|^class:'` (never `-d`, which prints secrets; without the filter the dump prints thousands of attribute lines). Offer entries of apps that are no longer installed; put everything else under "confirm". Delete only what the user picks, with `security delete-generic-password -s <service> -a <account>` or `security delete-internet-password -s <server> -a <account>` (without `-a` the first match is deleted). Deletion cannot be undone; say so in the question. Items in the System keychain need admin rights. Saved Wi-Fi passwords are removed from the known-networks list in System Settings, not from the keychain
+   - **A plaintext secret**: ask whether it is still used. If it is, only report it. If not, delete the line and tell the user to revoke the token at the provider. Check the edited file with `zsh -n` before replacing the original, and keep a backup of the original with the value replaced by `<removed>`, never a copy that still holds the secret
 5. **Items moved to `/tmp`**: `/tmp` is on the same volume, so moving alone does not increase free space. Report the moved size and the "real free space gained" (difference in `df` before and after) separately, and ask the user whether to empty them. When they approve, delete only the exact paths this run moved, one by one from the recorded list, and leave everything else under `/tmp$HOME` alone
 6. **sudo commands**: give the user the DNS flush and `purge` command to run themselves
    `sudo purge && sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`
-7. **macOS updates**: report the list and highlight security updates. Re-measure swap after the cleanup before recommending a restart: swap can drop on its own once memory pressure eases (10GB to under 1GB in one real run), so recommend a restart for swap only if it is still high
+7. **macOS updates**: report the list and highlight security updates. Re-measure swap after the cleanup before recommending a restart: swap can drop on its own once memory pressure eases (10GB to under 1GB in one real run), so recommend a restart for swap only if it is still high. If the user starts the OS update themselves, do not start `softwareupdate` as well. While an OS update is downloading, `df` free space drops by the size of the download (about 5GB in one run); say so when comparing before and after
 8. **Post-check**: confirm nothing the user relies on broke.
    - Development commands still resolve: `for c in python3 node git docker java; do command -v $c >/dev/null || echo "missing: $c"; done`
    - CLI launchers do not point at a removed app: `find /usr/local/bin -maxdepth 1 -type f -exec grep -l "\.app/" {} +` and check that each referenced path exists (use `find`, because a glob with no match is an error in zsh). Launchers are often symlinks, which `-type f` skips, so also list broken ones: `find /usr/local/bin -maxdepth 1 -type l ! -exec test -e {} \; -print`
@@ -247,7 +251,23 @@ When everything is done, write the final report in this format:
 
 ### 8. Not verified
 - ...
+
+### 9. Score (the skill's own estimate)
+| Area | Weight | Score | The one fact that set it |
+|------|--------|-------|--------------------------|
+| Disk | 20 | ... | ... |
+| Memory | 20 | ... | ... |
+| Security | 20 | ... | ... |
+| Backup and recovery | 15 | ... | ... |
+| Auto-start and leftovers | 15 | ... | ... |
+| Development environment | 10 | ... | ... |
+| **Total** | **100** | **...** | |
+
+What blocks a higher score, and who has to do it:
+- ...
 ```
+
+The weights in section 9 are fixed; do not change them between runs. Under the table, name each thing that blocks a higher score and who has to do it (for example: no backup destination needs an external disk from the user; an OS update needs a restart). Some points cannot be earned by the skill at all: in one run three of the missing points were of that kind.
 
 ## Key patterns
 
@@ -291,21 +311,31 @@ done
 
 ### Quitting Docker Desktop
 ```bash
-# Only when no container is running
-[ "$(docker ps -q | wc -l)" -eq 0 ] && osascript -e 'tell application "Docker" to quit'
+# Stop if containers cannot be listed. If the daemon is already unreachable the container
+# count is unknown: ask the user instead of quitting or killing
+quit_ok=0
+docker ps -q >/dev/null || { echo "cannot list containers: stop"; return; }
+
+# Quit only when the list is empty. The listing is checked again on this line because
+# outside a function bash prints an error at `return` and continues.
+# `quit_ok` lives only within one shell call: run the whole block in one call. If it is
+# empty at the kill line, ask the user instead of killing by hand
+c=$(docker ps -q) && [ -z "$c" ] && quit_ok=1 && osascript -e 'tell application "Docker" to quit'
 
 # Verify after 30 seconds. The quit request can be ignored: in one run the engine restarted twice
 # instead, and the VM grew from 1.6GB to 8.5GB
 ps -eo pid,rss,comm | grep -E "Docker.app|com.docker|Virtualization.VirtualMachine"
 
-# Still there: end the main process (parent PID 1) with TERM, never KILL, and check again.
+# Still there: end the main process with TERM, never KILL, and check again. The kill runs only
+# when the list was empty above, a PID was found, its parent is PID 1, and no container is listed now.
 # A `docker serve` or `com.docker.dev-envs` helper can be left behind with parent PID 1
-kill -TERM "$(pgrep -x Docker | head -1)"
+p=$(pgrep -x Docker | head -1); [ "$quit_ok" = 1 ] && [ -n "$p" ] && [ "$(ps -o ppid= -p "$p" | tr -d ' ')" = 1 ] && [ -z "$(docker ps -q 2>/dev/null)" ] && kill -TERM "$p"
 ```
 
 ### Admin action through the password dialog (only for what the user picked)
 ```bash
-# Put the commands in a script, then let macOS ask for the password
+# Put the commands in a script, show it to the user, then let macOS ask for the password
+mkdir -p "$HOME/.mac-optimize/rebuild/$(date +%Y%m%d)"
 cat > "$HOME/.mac-optimize/rebuild/$(date +%Y%m%d)/admin.sh" <<'EOF'
 #!/bin/sh
 mkdir -p /tmp/Library/LaunchDaemons
