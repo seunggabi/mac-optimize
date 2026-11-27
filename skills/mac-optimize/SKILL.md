@@ -17,6 +17,7 @@ A workflow that analyzes resource usage on macOS, cleans up unneeded files and s
 - **Report instead of acting when evidence conflicts**: if signs disagree about which copy is in use (for example the Dock and a CLI launcher point at different copies), or the item is settings or data, do not move it. Hand it to the user with the evidence.
 - **Re-measure only when run recently**: if the last run was the same day, do not repeat finished cleanups. Re-run Phase 1 and give agents only the areas not yet examined.
 - **An old modification time does not mean unused**: a `.venv` or `node_modules` untouched for 30 days can still be executed every day. Even when the user approves deleting build output, leave out any repository that has a live process working in it (a terminal session, an IDE, a coding agent), or name those repositories and ask again.
+- **Record how to rebuild before removing**: "regenerable" is only true if the recipe exists. Before moving a virtualenv, save its Python version (`pyvenv.cfg`) and `<venv>/bin/pip freeze` to a file kept with the list of moved paths. If there is no lock file or requirements file and the freeze cannot be taken, do not move it. In one real run a virtualenv with no requirements file could not be rebuilt at all, and two others came back at 14MB instead of 219MB because hand-installed packages were not recorded anywhere.
 - **Uninstall managed apps through their manager**: an app installed by JetBrains Toolbox, Homebrew, or a similar manager should be removed with that manager. Removing the bundle by hand leaves a dead entry in the manager, and the manager may delete the CLI launcher it generated (for example `/usr/local/bin/pycharm`).
 
 ## Workflow
@@ -70,6 +71,8 @@ Summarize the diagnosis for the user as tables:
 Launch 5 agents **at the same time** in the background.
 
 An agent sees only the prompt you write for it. Paste the Core principles and the security-software keyword list (end of this file) into every agent prompt, together with its team section.
+
+Give every agent a hard limit for its final report (for example "under 600 words, tables only, at most 15 rows"). An analysis agent with no limit can exceed the output cap and fail with nothing returned.
 
 #### Team 1: cache-cleaner (caches and temp files)
 
@@ -171,6 +174,7 @@ After the agents finish:
    - Development commands still resolve: `for c in python3 node git docker java; do command -v $c >/dev/null || echo "missing: $c"; done`
    - CLI launchers do not point at a removed app: `find /usr/local/bin -maxdepth 1 -type f -exec grep -l "\.app/" {} +` and check that each referenced path exists (use `find`, because a glob with no match is an error in zsh)
    - Removed build output does not sit in a directory where a process is working: compare the removed paths with `lsof -a -p <pid> -d cwd -Fn` of terminal, IDE, and agent processes, and report any overlap
+   - Apps whose caches were removed still start. Ask the user first, because this opens apps on their screen. For each app that is not already running: `open -g -j -a "<app>"`, wait about 25 seconds, check that the process is alive and that no new file for it appeared in `~/Library/Logs/DiagnosticReports`, then quit it with `osascript -e 'tell application "<app>" to quit'`. Skip an app that is already running. If an app does not quit (an open dialog), leave it running and tell the user; never force-quit
 9. **Re-setup list**: for everything removed, tell the user what they need to run before using it again (`terraform init`, `npm install`, recreate the virtualenv, re-pull Docker images, cold-boot the emulator)
 
 ### Phase 4: Final report
