@@ -1,50 +1,50 @@
 ---
 name: mac-optimize
-description: "macOS 시스템 전체 점검 및 최적화 스킬. 메모리, CPU, 디스크 사용량 분석, 불필요한 캐시/로그/임시파일 정리, Homebrew 패키지 업데이트, 불필요한 백그라운드 서비스 중지, 자동시작 프로세스 관리를 수행한다. 사용자가 '컴퓨터 최적화', '시스템 정리', '맥 느려', '디스크 정리', '메모리 부족', '캐시 정리', '시스템 점검', 'mac cleanup', 'system optimize' 등을 언급하면 이 스킬을 사용한다."
+description: "Full macOS system check and cleanup. Analyzes memory, CPU, and disk usage, cleans caches/logs/temp files, updates Homebrew packages, stops unneeded background services, and reviews auto-start items. Use when the user mentions 'mac cleanup', 'system optimize', 'mac is slow', 'disk cleanup', 'out of memory', 'clear cache', 'system check', or in Korean '컴퓨터 최적화', '시스템 정리', '맥 느려', '디스크 정리', '메모리 부족', '캐시 정리', '시스템 점검'."
 ---
 
 # macOS System Optimize
 
-macOS 시스템의 리소스 사용량을 분석하고, 불필요한 파일과 서비스를 정리하여 성능을 최적화하는 워크플로우.
+A workflow that analyzes resource usage on macOS, cleans up unneeded files and services, and reports the result with before/after numbers.
 
-## 핵심 원칙
+## Core principles
 
-- **안전 우선**: `rm -rf` 절대 사용 금지. 캐시 매니저의 purge/clean 명령을 우선 사용하고, 그 외에는 `/tmp/`로 이동하는 방식 사용.
-- **보안 SW 미변경**: 회사 보안 소프트웨어(Fortinet, AhnLab, Jiran, PNPSecure, Wizvera 등)는 절대 중지하지 않는다.
-- **병렬 실행**: 독립적인 점검/정리 작업은 반드시 병렬 에이전트로 수행하여 시간을 절약한다.
-- **Before/After 보고**: 모든 작업에 대해 이전/이후 용량을 측정하여 결과를 정량적으로 보고한다.
-- **실제 여유는 `df` 로 검증**: `du` 수치는 회수되는 공간이 아닐 수 있다. `/tmp` 로 옮긴 것은 같은 볼륨이라 그대로이고, APFS 클론(예: `/private/var/folders/*/*/X/*.code_sign_clone`, `du` 로는 수십 GB)은 원본과 블록을 공유해 지워도 여유가 늘지 않는다.
-- **근거가 엇갈리면 보고만**: 어느 쪽이 쓰이는지 근거가 서로 다르거나(예: Dock 과 CLI 스크립트가 다른 사본을 가리킴) 설정·데이터 성격인 항목은 옮기지 말고 근거와 함께 사용자에게 넘긴다.
-- **최근에 돌렸으면 재측정만**: 직전 실행이 같은 날이면 끝난 정리를 반복하지 않는다. Phase 1 을 다시 재고, 아직 안 본 영역만 에이전트에 맡긴다.
+- **Safety first**: never use `rm -rf`. Prefer a cache manager's own purge/clean command; otherwise move the target to `/tmp/`.
+- **Never touch security software**: do not stop or change corporate security software (Fortinet, AhnLab, Jiran, PNPSecure, Wizvera, and the like).
+- **Run in parallel**: independent checks and cleanups go to parallel agents.
+- **Before/After reporting**: measure every action before and after and report the numbers.
+- **Verify real free space with `df`**: a `du` figure is not always reclaimable space. Anything moved to `/tmp` stays on the same volume, and APFS clones (for example `/private/var/folders/*/*/X/*.code_sign_clone`, which `du` reports as tens of GB) share blocks with the original, so deleting them frees nothing.
+- **Report instead of acting when evidence conflicts**: if signs disagree about which copy is in use (for example the Dock and a CLI launcher point at different copies), or the item is settings or data, do not move it. Hand it to the user with the evidence.
+- **Re-measure only when run recently**: if the last run was the same day, do not repeat finished cleanups. Re-run Phase 1 and give agents only the areas not yet examined.
 
-## 워크플로우
+## Workflow
 
-### Phase 1: 시스템 상태 진단 (직접 수행)
+### Phase 1: Diagnose system state (do this yourself)
 
-먼저 현재 시스템 상태를 빠르게 파악한다. 아래 명령들을 **병렬로** 실행:
+Get a quick picture of the system. Run these **in parallel**:
 
 ```bash
-# CPU/메모리 요약
+# CPU / memory summary
 top -l 1 -n 0 | head -12
 
-# 디스크 사용량
+# Disk usage
 df -h / /System/Volumes/Data
 
-# 총 RAM 및 VM 통계
+# Total RAM and VM stats
 echo "Total RAM: $(( $(sysctl -n hw.memsize) / 1073741824 )) GB"
 vm_stat | head -10
 sysctl vm.swapusage
 
-# 메모리 상위 프로세스 (macOS 형식)
+# Top memory processes
 ps -eo pid,rss,comm -r | head -20
 
-# CPU 상위 프로세스 (ps 의 %CPU 는 프로세스 수명 평균이다. 지금 부하는 top 으로 본다)
+# Top CPU processes (ps %CPU is a lifetime average; use top for the current load)
 top -l 2 -n 10 -o cpu -stats pid,cpu,mem,command | tail -11
 
-# 캐시 디렉토리 크기
+# Cache directory sizes
 du -sh ~/Library/Caches/*/ 2>/dev/null | sort -hr | head -15
 
-# 로그인 항목
+# Login items
 osascript -e 'tell application "System Events" to get the name of every login item'
 
 # LaunchAgents
@@ -52,218 +52,218 @@ ls ~/Library/LaunchAgents/ 2>/dev/null
 ls /Library/LaunchAgents/ 2>/dev/null
 ls /Library/LaunchDaemons/ 2>/dev/null
 
-# 실행중인 비-Apple 서비스
+# Running non-Apple services
 launchctl list | grep -v "com.apple" | grep -v "^\-" | head -30
 ```
 
-진단 결과를 사용자에게 테이블 형태로 요약 보고한다:
-- CPU: idle %, Load Avg
-- 메모리: 총량, 사용량, compressor 크기
-- 디스크: 총량, 사용량, 여유 공간
-- 리소스 상위 프로세스 TOP 5
-- 주요 캐시 크기
+Summarize the diagnosis for the user as tables:
+- CPU: idle %, load average
+- Memory: total, used, compressor size, swap used
+- Disk: total, used, free
+- Top 5 resource consumers
+- Largest caches
 
-### Phase 2: 병렬 에이전트 팀 구성
+### Phase 2: Parallel agent teams
 
-5개의 에이전트를 **동시에** 백그라운드로 실행한다:
+Launch 5 agents **at the same time** in the background:
 
-#### Team 1: cache-cleaner (캐시 및 임시파일 정리)
+#### Team 1: cache-cleaner (caches and temp files)
 
-수행 작업:
+Tasks:
 - `pip cache purge`
 - `npm cache clean --force`
-- `~/Library/Logs` 내 30일 이상 오래된 로그 파일을 `/tmp/`로 이동
-- 브라우저 캐시 정리 (Whale, Chrome 등 - `/tmp/`로 이동)
-- JetBrains 캐시 중 안전한 항목(backup, download, temp) 정리
-- `~/Library/Logs/JetBrains` 에서 설치 버전보다 낮은 버전·미설치 제품의 로그 디렉터리를 `/tmp/`로 이동 (설치 버전은 `defaults read "<앱>/Contents/Info.plist" CFBundleShortVersionString`)
-- 사용자 임시 폴더(`getconf DARWIN_USER_TEMP_DIR`)에서 수정·접근이 모두 3일 넘고 열려 있지 않은 최상위 항목을 `/tmp/`로 이동
-- 각 작업의 이전/이후 용량 측정
+- Move log files older than 30 days in `~/Library/Logs` to `/tmp/`
+- Clean browser caches (Whale, Chrome, and so on) by moving them to `/tmp/`
+- Clean the safe parts of JetBrains caches (backup, download, temp)
+- In `~/Library/Logs/JetBrains`, move log directories of versions lower than the installed one, and of products that are not installed, to `/tmp/` (read the installed version with `defaults read "<app>/Contents/Info.plist" CFBundleShortVersionString`)
+- In the user temp directory (`getconf DARWIN_USER_TEMP_DIR`), move top-level items whose modification and access times are both older than 3 days and that are not open to `/tmp/`
+- Measure size before and after each task
 
-주의사항:
-- `rm -rf` 사용 금지, `/tmp/` 이동 방식 사용
-- 캐시 매니저가 제공하는 purge/clean 명령 우선 사용
-- IDE별 핵심 캐시(인덱스 등)는 유지
-- brew 명령은 실행하지 않는다 (Team 2 의 upgrade 와 lock 이 충돌한다. cleanup 은 Team 2 가 upgrade 뒤에 한다)
-- 앱 캐시(`Cache`, `Code Cache`, `GPUCache`, `Service Worker/CacheStorage`)는 그 앱이 실행 중이 아닐 때만 옮긴다 (`ps -eo comm` 으로 확인)
-- "옛 버전 캐시"라고 판단하기 전에 그 앱이 설치돼 있는지 확인한다 (`/Applications`, `~/Applications`). 설치된 버전의 캐시는 옛 캐시가 아니다
+Notes:
+- No `rm -rf`; move to `/tmp/` instead
+- Prefer the purge/clean command a cache manager provides
+- Keep core IDE caches (indexes and the like)
+- Do not run brew commands (they collide with Team 2's upgrade lock; Team 2 runs cleanup after the upgrade)
+- Move app caches (`Cache`, `Code Cache`, `GPUCache`, `Service Worker/CacheStorage`) only when the app is not running (check with `ps -eo comm`)
+- Before calling something an "old version cache", check whether the app is installed (`/Applications`, `~/Applications`). The cache of an installed version is not old
 
-#### Team 2: brew-updater (Homebrew 업데이트)
+#### Team 2: brew-updater (Homebrew)
 
-수행 작업:
-- `HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --formula` / `--cask` 로 목록 확인
-- `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --formula` 실행
-- `HOMEBREW_NO_AUTO_UPDATE=1 brew autoremove` 실행
-- `HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup --prune=all` 실행 (다운로드 캐시까지 정리)
-- `HOMEBREW_NO_AUTO_UPDATE=1 brew doctor` 로 문제 진단
-- 발견된 문제 가능한 범위 내 수정
+Tasks:
+- List with `HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --formula` and `--cask`
+- Run `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --formula`
+- Run `HOMEBREW_NO_AUTO_UPDATE=1 brew autoremove`
+- Run `HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup --prune=all` (also clears the download cache)
+- Diagnose with `HOMEBREW_NO_AUTO_UPDATE=1 brew doctor`
+- Fix what can be fixed safely
 
-주의사항:
-- 항상 `HOMEBREW_NO_AUTO_UPDATE=1` 환경변수 사용 (brew update가 homebrew-core 클론을 시도하며 매우 느려지는 것 방지)
-- lock 충돌 시 `pkill -f "brew upgrade"` 후 재시도
-- 메이저 버전 변경이 필요한 패키지는 목록만 보고
-- cask 는 업그레이드하지 않고 목록만 보고 (실행 중인 앱이 재시작될 수 있다)
-- 실행 중이거나 데이터가 걸린 서비스(MySQL, MariaDB, Kafka 등)는 업그레이드에서 빼고 목록만 보고
-- `brew doctor` 가 권하는 `rm -rf`·`sudo` 명령은 실행하지 않고 보고만
+Notes:
+- Always set `HOMEBREW_NO_AUTO_UPDATE=1` (otherwise brew update tries to clone homebrew-core and gets very slow)
+- On a lock conflict, `pkill -f "brew upgrade"` and retry
+- For packages that need a major version change, only list them
+- Do not upgrade casks; only list them (a running app may restart)
+- Leave out services that are running or hold data (MySQL, MariaDB, Kafka, and so on); only list them
+- Do not run the `rm -rf` or `sudo` commands that `brew doctor` suggests; report them
 
-#### Team 3: service-optimizer (서비스 최적화)
+#### Team 3: service-optimizer (services)
 
-수행 작업:
-- `brew services list` 로 상태 확인
-- 개발용 서비스(Kafka, Redis, Elasticsearch 등) 중 상시 불필요한 것 중지
-- `brew services stop <service>` 로 중지 (plist도 제거되어 재부팅 후에도 안 올라옴)
-- FortiClient 등 비정상 CPU 사용 확인
-- 실행중이지 않은 서비스 상태 확인 (Nginx, Docker 등)
-- 오래 떠 있는 프로세스 집계: 같은 이름 프로세스의 개수·메모리 합계·가동 시간 (`ps -eo pid,rss,etime,comm`). 터미널 세션·IDE 창이 수십 개 쌓여 메모리를 차지하는 경우가 많다
-- 죽은 자동시작 항목 찾기: LaunchAgents·LaunchDaemons plist 의 실행 파일(`plutil -extract ProgramArguments.0 raw <plist>`)이 없는 것을 표시. `/Library` 아래는 제거에 관리자 권한이 필요하니 보고만 한다
+Tasks:
+- Check status with `brew services list`
+- Stop development services (Kafka, Redis, Elasticsearch, and so on) that do not need to run all the time
+- Stop with `brew services stop <service>` (this also removes the plist, so it will not come back after a reboot)
+- Check for abnormal CPU use by FortiClient and similar
+- Check services that are not running (Nginx, Docker, and so on)
+- Aggregate long-running processes: count, total memory, and uptime per process name (`ps -eo pid,rss,etime,comm`). Dozens of terminal sessions or IDE windows often pile up and hold memory
+- Find dead auto-start items: flag LaunchAgents and LaunchDaemons plists whose executable (`plutil -extract ProgramArguments.0 raw <plist>`) no longer exists. Items under `/Library` need admin rights to remove, so only report them
 
-주의사항:
-- 사용자 프로세스(터미널 세션, IDE 등)는 목록만 보고하고, 종료는 사용자가 요청할 때만 한다. 종료 전 자식 프로세스에 진행 중인 작업이 없는지 확인하고 `kill -TERM` 을 쓴다 (`-KILL` 금지)
-- 보안 소프트웨어(Fortinet, AhnLab, Jiran, PNPSecure, Wizvera, CrossEx 등) 절대 미변경
-- MySQL 등 사용자가 유지를 원할 수 있는 DB는 기본 유지
-- `brew services stop`은 LaunchAgent plist를 제거하므로 재부팅 후에도 안전
+Notes:
+- Only list user processes (terminal sessions, IDEs, and so on); end them only when the user asks. Before ending one, check that its child processes have no work in progress, and use `kill -TERM` (never `-KILL`)
+- Never change security software (Fortinet, AhnLab, Jiran, PNPSecure, Wizvera, CrossEx, and so on)
+- Keep databases the user may want, such as MySQL, by default
+- `brew services stop` removes the LaunchAgent plist, so it is safe across reboots
 
-#### Team 4: disk-analyzer (디스크 공간 분석)
+#### Team 4: disk-analyzer (disk space)
 
-수행 작업:
-- `du -sh ~/*` 홈 디렉토리 top 15
-- `~/Library` 내 대용량 디렉토리 분석
-- Docker 상태 확인 (`docker system df`). 정리는 사용자가 요청할 때만 `docker system prune -a` 로 하고, 볼륨은 DB 데이터가 있을 수 있어 따로 확인받는다
-- `/tmp$HOME` 크기 확인 (이전 실행에서 옮겨 둔 것이 쌓여 있을 수 있다)
-- `/private/var/folders` 의 사용자 임시·캐시 폴더 크기 확인 (`getconf DARWIN_USER_TEMP_DIR`, `DARWIN_USER_CACHE_DIR`)
-- 앱별 크기와 마지막 사용일 (`mdls -raw -name kMDItemLastUsedDate <앱>`). 같은 앱이 두 벌 있거나 180일 넘게 안 쓴 큰 앱을 표시 (삭제하지 않고 목록만)
-- 재생성 가능한 산출물 중 30일 넘게 안 건드린 것 목록: `node_modules`, `.venv`, `build`, `.terraform/providers` (삭제하지 않고 목록만)
-- 개발 도구 데이터: `~/.npm/_npx` 의 30일 넘은 설치본, `~/.local/share/claude/versions` 에서 링크 대상도 실행 중도 아닌 버전, 앱이 없는데 남은 도구 폴더(`~/.codeium` 등), 여러 벌 깔린 런타임(JDK, Python) 목록
-- `node_modules` 목록 (삭제하지 않고 목록만)
-- 큰 `.git` 디렉토리 확인
-- Java hprof 크래시 덤프 등 불필요 대용량 파일 식별
-- Xcode/Developer 캐시 확인
+Tasks:
+- Top 15 of the home directory with `du -sh ~/*`
+- Large directories inside `~/Library`
+- Docker status (`docker system df`). Clean only when the user asks, with `docker system prune -a`; ask separately about volumes because they may hold database data
+- Size of `/tmp$HOME` (items moved by earlier runs may have piled up)
+- Size of the user temp and cache directories under `/private/var/folders` (`getconf DARWIN_USER_TEMP_DIR`, `DARWIN_USER_CACHE_DIR`)
+- Size and last-used date per app (`mdls -raw -name kMDItemLastUsedDate <app>`). Flag apps installed twice and large apps unused for more than 180 days (list only, do not delete)
+- Regenerable build output untouched for more than 30 days: `node_modules`, `.venv`, `build`, `.terraform/providers` (list only, do not delete)
+- Developer tool data: installs in `~/.npm/_npx` older than 30 days, versions in `~/.local/share/claude/versions` that are neither the link target nor running, tool folders left behind without their app (`~/.codeium` and the like), runtimes installed several times (JDK, Python)
+- List `node_modules` (list only, do not delete)
+- Large `.git` directories
+- Large disposable files such as Java hprof crash dumps
+- Xcode / Developer caches
 
-#### Team 5: system-health (시스템 건강 점검)
+#### Team 5: system-health (system health)
 
-수행 작업:
-- `softwareupdate -l` 로 macOS 소프트웨어 업데이트 확인 (설치하지 않고 목록만)
-- `diskutil verifyVolume /` 디스크 볼륨 무결성 확인
-- 가동 시간 확인: `uptime` (재부팅 없이 오래 쓰면 스왑이 비워지지 않는다)
-- `.DS_Store` 파일 목록 확인 (홈 디렉토리 1단계만)
-- 휴지통 크기 확인: `du -sh ~/.Trash/ 2>/dev/null`
-- Time Machine 로컬 스냅샷 확인: `tmutil listlocalsnapshots /`
-- 시스템 무결성 보호(SIP) 상태 확인: `csrutil status`
-- 스왑 사용량 확인: `sysctl vm.swapusage`
-- 열린 파일 수 확인: `sysctl kern.maxfiles kern.maxfilesperproc`
-- 디스크·배터리 상태: `diskutil info / | grep SMART`, `system_profiler SPPowerDataType | grep -E "Cycle Count|Condition|Maximum Capacity"`
-- 보호 기능 상태: `fdesetup status`, `spctl --status`
+Tasks:
+- List macOS software updates with `softwareupdate -l` (list only, do not install)
+- Verify the volume with `diskutil verifyVolume /`
+- Uptime: `uptime` (swap is not cleared when the machine runs for a long time without a reboot)
+- `.DS_Store` files (first level of the home directory only)
+- Trash size: `du -sh ~/.Trash/ 2>/dev/null`
+- Time Machine local snapshots: `tmutil listlocalsnapshots /`
+- System Integrity Protection: `csrutil status`
+- Swap usage: `sysctl vm.swapusage`
+- Open file limits: `sysctl kern.maxfiles kern.maxfilesperproc`
+- Disk and battery health: `diskutil info / | grep SMART`, `system_profiler SPPowerDataType | grep -E "Cycle Count|Condition|Maximum Capacity"`
+- Protection status: `fdesetup status`, `spctl --status`
 
-주의사항:
-- `softwareupdate --install`은 실행하지 않고 목록만 보고
-- Time Machine 스냅샷은 삭제하지 않고 크기만 보고
-- `sudo` 는 실행하지 않는다 (에이전트는 비밀번호를 입력할 수 없다). DNS 플러시와 `purge` 는 Phase 4 권장사항에 명령으로 안내한다
+Notes:
+- Do not run `softwareupdate --install`; only list
+- Do not delete Time Machine snapshots; only report their size
+- Do not run `sudo` (an agent cannot type a password). Give the DNS flush and `purge` commands to the user in the Phase 4 recommendations
 
-### Phase 3: 결과 수집 및 추가 조치
+### Phase 3: Collect results and follow up
 
-에이전트 완료 후:
+After the agents finish:
 
-1. **Java hprof 파일 정리**: `find ~ -maxdepth 1 -name 'java_error_in_*.hprof'` 로 찾아 `/tmp/`로 이동 (JVM 크래시 덤프, 안전하게 삭제 가능)
-2. **brew upgrade lock 충돌 처리**: 실패한 패키지가 있으면 stale 프로세스 kill 후 재시도
-3. **휴지통 정리**: 휴지통이 크면 사용자에게 비우기 권장 (자동 삭제하지 않음)
-4. **`/tmp` 이동분 안내**: `/tmp` 는 같은 볼륨이라 옮기기만 해서는 디스크 여유가 늘지 않는다. 옮긴 용량과 "실제 늘어난 여유"(`df` 전후 차이)를 구분해 보고하고, `/tmp$HOME` 을 비울지 사용자에게 묻는다. 비울 때는 이번 실행에서 옮긴 경로만 지우고, 다른 작업이 옮겨 둔 파일은 남긴다
-5. **sudo 명령 안내**: DNS 플러시·`purge` 는 사용자가 직접 실행하도록 명령을 준다
+1. **Java hprof files**: find them with `find ~ -maxdepth 1 -name 'java_error_in_*.hprof'` and move them to `/tmp/` (JVM crash dumps, safe to delete)
+2. **brew upgrade lock conflicts**: if a package failed, kill the stale process and retry
+3. **Trash**: if the Trash is large, recommend emptying it (do not empty it automatically)
+4. **Items moved to `/tmp`**: `/tmp` is on the same volume, so moving alone does not increase free space. Report the moved size and the "real free space gained" (difference in `df` before and after) separately, and ask the user whether to empty `/tmp$HOME`. When emptying, delete only the paths this run moved and leave files other work has put there
+5. **sudo commands**: give the user the DNS flush and `purge` command to run themselves
    `sudo purge && sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`
-6. **macOS 업데이트 목록 보고**: 보안 업데이트가 있으면 강조하여 권장. 스왑 사용이 크고 가동 시간이 길면 재시작을 함께 권장
+6. **macOS updates**: report the list and highlight security updates. If swap use is high and uptime is long, also recommend a restart
 
-### Phase 4: 종합 보고서
+### Phase 4: Final report
 
-모든 작업 완료 후 아래 형식으로 최종 보고서를 작성:
+When everything is done, write the final report in this format:
 
 ```
-## 최종 시스템 최적화 종합 보고서
+## Final system optimization report
 
-### 1. 디스크 정리 결과
-| 작업 | 용량 | 실제 여유 반영 |
-|------|------|----------------|
-| ... | ... | 반영됨 / /tmp 대기 |
-| **실제 늘어난 여유 (df 기준)** | **XXX GB** | |
+### 1. Disk cleanup
+| Action | Size | Counted in real free space |
+|--------|------|----------------------------|
+| ... | ... | yes / waiting in /tmp |
+| **Real free space gained (by df)** | **XXX GB** | |
 
-### 2. Homebrew 패키지 업데이트
-- 업그레이드 완료: N개
-- 미완료 (수동 필요): ...
-- brew doctor 결과: ...
+### 2. Homebrew packages
+- Upgraded: N
+- Not done (manual): ...
+- brew doctor: ...
 
-### 3. 서비스 최적화
-| 서비스 | 조치 |
-|--------|------|
+### 3. Services
+| Service | Action |
+|---------|--------|
 | ... | ... |
 
-### 4. 시스템 상태 비교 (Before → After)
-| 항목 | 이전 | 이후 |
-|------|------|------|
+### 4. System state (Before → After)
+| Item | Before | After |
+|------|--------|-------|
 | CPU idle | X% | Y% |
 | Load Avg | X | Y |
-| 여유 메모리 / 스왑 사용 | X GB | Y GB |
-| 디스크 여유 | X GB | Y GB |
+| Free memory / swap used | X GB | Y GB |
+| Disk free | X GB | Y GB |
 
-### 5. 추가 권장사항 (수동 작업)
-| 우선순위 | 항목 | 예상 효과 |
-|----------|------|-----------|
+### 5. Further recommendations (manual)
+| Priority | Item | Expected effect |
+|----------|------|-----------------|
 | ... | ... | ... |
 ```
 
-## 중요 패턴
+## Key patterns
 
-### 안전한 삭제 방식
+### Safe deletion
 ```bash
-# 캐시 매니저 명령 우선
+# Prefer the cache manager's command
 pip cache purge
 npm cache clean --force
 brew cleanup
 
-# 매니저가 없는 경우 /tmp로 이동
+# No manager: move to /tmp
 mkdir -p "/tmp$HOME/Library/Caches"
 mv ~/Library/Caches/SomeApp "/tmp$HOME/Library/Caches/SomeApp"
 
-# 충돌 방지 (이미 존재하면 타임스탬프 추가)
+# Avoid collisions (add a timestamp when the target exists)
 mv ~/some/path "/tmp$HOME/some/path_$(date +%Y%m%d_%H%M%S)"
 ```
 
-### zsh 목록 반복
+### Looping over a list in zsh
 ```bash
-# zsh 는 $VAR 를 단어 분리하지 않는다. 목록은 배열로 쓴다
-T=(101 102 103); for p in $T; do kill -TERM $p; done   # 맞음
-T="101 102 103"; for p in $T; do kill -TERM $p; done   # 한 번만 돌고 실패
+# zsh does not word-split $VAR. Use an array for lists
+T=(101 102 103); for p in $T; do kill -TERM $p; done   # correct
+T="101 102 103"; for p in $T; do kill -TERM $p; done   # loops once and fails
 ```
 
-### 실행 중 여부 확인
+### Checking whether something is running
 ```bash
-# 반복문 안에서 ps | grep "$이름" 을 쓰면 grep 자신이 걸려 전부 "실행 중"으로 나온다.
-# 실행 중 목록을 먼저 한 번 만들고 그 목록과 비교한다
+# Inside a loop, ps | grep "$name" matches the grep itself, so everything looks "running".
+# Build the running list once first, then compare against it
 RUN=$(ps -eo command | grep -v grep | grep -o "_npx/[a-f0-9]\{8,\}" | sort -u)
 case "$RUN" in *"$h"*) echo "skip $h";; esac
 ```
 
-### brew 명령 패턴
+### brew commands
 ```bash
-# 항상 auto-update 비활성화
+# Always disable auto-update
 HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade
 HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup
 HOMEBREW_NO_AUTO_UPDATE=1 brew outdated
 HOMEBREW_NO_AUTO_UPDATE=1 brew doctor
 ```
 
-### 서비스 영구 중지
+### Stopping a service for good
 ```bash
-# brew services stop은 plist를 제거하므로 재부팅 후에도 안전
+# brew services stop removes the plist, so it is safe across reboots
 brew services stop kafka
 
-# 확인
+# Verify
 ls ~/Library/LaunchAgents/homebrew.mxcl.kafka.plist  # should not exist
 ```
 
-### 보안 소프트웨어 식별 패턴
-다음 키워드가 포함된 서비스는 회사 보안정책일 가능성이 높으므로 절대 변경하지 않는다:
-- fortinet, forticlient (VPN/보안)
-- ahnlab, astx (안티바이러스)
-- jiran, jkok (DLP/보안)
-- pnpsecure, pcassist (보안)
-- wizvera, delfino, veraport (공인인증)
-- iniline, crossex (공인인증)
-- nprotect (게임/보안)
-- raon, touchen (공인인증)
+### Identifying security software
+A service whose name contains one of these keywords is likely required by corporate security policy. Never change it:
+- fortinet, forticlient (VPN / security)
+- ahnlab, astx (antivirus)
+- jiran, jkok (DLP / security)
+- pnpsecure, pcassist (security)
+- wizvera, delfino, veraport (certificate tools)
+- iniline, crossex (certificate tools)
+- nprotect (game / security)
+- raon, touchen (certificate tools)
