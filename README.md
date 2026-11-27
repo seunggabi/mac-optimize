@@ -7,13 +7,15 @@ Five parallel agents handle cache cleanup, Homebrew updates, service checks, dis
 ## Install
 
 ```bash
-npx skills add seunggabi/mac-optimize
+npx skills add seunggabi/mac-optimize      # into the current project
+npx skills add seunggabi/mac-optimize -g   # for your user, all projects
 ```
 
 ### Manual install
 
 ```bash
 git clone https://github.com/seunggabi/mac-optimize.git
+mkdir -p ~/.claude/skills
 ln -s "$(pwd)/mac-optimize/skills/mac-optimize" ~/.claude/skills/mac-optimize
 ```
 
@@ -46,7 +48,7 @@ It also triggers on phrases like "mac is slow", "disk cleanup", or "system check
 
 - Never uses `rm -rf`. It runs a cache manager's own command or moves the target to `/tmp$HOME/...`.
 - Never touches security software (VPN, antivirus, DLP, certificate tools).
-- Does not run `sudo`, install macOS updates, upgrade casks, prune Docker, or end processes on its own. It lists them or gives you the command.
+- Does not run `sudo`, install macOS updates, upgrade casks, stop services, prune Docker, or end processes on its own. It lists them and acts only on what you pick.
 - `/tmp` is on the same volume, so moving files there does not free space. It asks before emptying it.
 - Free space is verified with `df`, because a `du` figure is not always reclaimable (APFS clones).
 

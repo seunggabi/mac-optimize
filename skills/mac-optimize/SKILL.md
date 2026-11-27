@@ -9,7 +9,7 @@ A workflow that analyzes resource usage on macOS, cleans up unneeded files and s
 
 ## Core principles
 
-- **Safety first**: never use `rm -rf`. Prefer a cache manager's own purge/clean command; otherwise move the target to `/tmp/`.
+- **Safety first**: never use `rm -rf` on an original location. Prefer a cache manager's own purge/clean command; otherwise move the target to `/tmp/`. A moved item stays recoverable only until `/tmp` is cleaned (a reboot, or macOS purging old files after about 3 days). The one allowed deletion is emptying paths this run already moved under `/tmp`, after the user approves.
 - **Never touch security software**: do not stop or change corporate security software (Fortinet, AhnLab, Jiran, PNPSecure, Wizvera, and the like).
 - **Run in parallel**: independent checks and cleanups go to parallel agents.
 - **Before/After reporting**: measure every action before and after and report the numbers.
@@ -37,8 +37,8 @@ echo "Total RAM: $(( $(sysctl -n hw.memsize) / 1073741824 )) GB"
 vm_stat | head -10
 sysctl vm.swapusage
 
-# Top memory processes
-ps -eo pid,rss,comm -r | head -20
+# Top memory processes (-m sorts by memory; -r would sort by CPU)
+ps -eo pid,rss,comm -m | head -20
 
 # Top CPU processes (ps %CPU is a lifetime average; use top for the current load)
 top -l 2 -n 10 -o cpu -stats pid,cpu,mem,command | tail -11
@@ -67,7 +67,9 @@ Summarize the diagnosis for the user as tables:
 
 ### Phase 2: Parallel agent teams
 
-Launch 5 agents **at the same time** in the background:
+Launch 5 agents **at the same time** in the background.
+
+An agent sees only the prompt you write for it. Paste the Core principles and the security-software keyword list (end of this file) into every agent prompt, together with its team section.
 
 #### Team 1: cache-cleaner (caches and temp files)
 
@@ -78,7 +80,7 @@ Tasks:
 - Clean browser caches (Whale, Chrome, and so on) by moving them to `/tmp/`
 - Clean the safe parts of JetBrains caches (backup, download, temp)
 - In `~/Library/Logs/JetBrains`, move log directories of versions lower than the installed one, and of products that are not installed, to `/tmp/` (read the installed version with `defaults read "<app>/Contents/Info.plist" CFBundleShortVersionString`)
-- In the user temp directory (`getconf DARWIN_USER_TEMP_DIR`), move top-level items whose modification and access times are both older than 3 days and that are not open to `/tmp/`
+- In the user temp directory (`getconf DARWIN_USER_TEMP_DIR`), list the largest top-level items with their size and modification time. Report only; do not move anything there (sockets, `TemporaryItems`, `com.apple.*`, and `*.code_sign_clone` entries can belong to live daemons or updaters)
 - Measure size before and after each task
 
 Notes:
@@ -93,36 +95,31 @@ Notes:
 
 Tasks:
 - List with `HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --formula` and `--cask`
-- Run `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --formula`
-- Run `HOMEBREW_NO_AUTO_UPDATE=1 brew autoremove`
+- Build the upgrade list: take the names from `brew outdated --formula`, drop every major version change and every formula that appears in `brew services list`. Run `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --formula <names>` with that explicit list. If the list is empty, do not run upgrade at all
+- Run `HOMEBREW_NO_AUTO_UPDATE=1 brew autoremove --dry-run` first. Run the real `brew autoremove` only if the dry-run list holds nothing the user would call directly (runtimes, databases, CLIs); otherwise report the list
 - Run `HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup --prune=all` (also clears the download cache)
-- Diagnose with `HOMEBREW_NO_AUTO_UPDATE=1 brew doctor`
-- Fix what can be fixed safely
+- Diagnose with `HOMEBREW_NO_AUTO_UPDATE=1 brew doctor` and report the findings. Fix none of them
 
 Notes:
 - Always set `HOMEBREW_NO_AUTO_UPDATE=1` (otherwise brew update tries to clone homebrew-core and gets very slow)
-- On a lock conflict, `pkill -f "brew upgrade"` and retry
-- For packages that need a major version change, only list them
-- Do not upgrade casks; only list them (a running app may restart)
-- Leave out services that are running or hold data (MySQL, MariaDB, Kafka, and so on); only list them
+- On a lock conflict, wait 30 seconds and retry once, then report. Do not `pkill -f "brew upgrade"`: it matches any command line containing that text, including your own shell and a brew the user is running in another terminal
+- Never run bare `brew upgrade` (it also upgrades casks, and a running app may restart). Only list outdated casks
 - Do not run the `rm -rf` or `sudo` commands that `brew doctor` suggests; report them
 
 #### Team 3: service-optimizer (services)
 
 Tasks:
 - Check status with `brew services list`
-- Stop development services (Kafka, Redis, Elasticsearch, and so on) that do not need to run all the time
-- Stop with `brew services stop <service>` (this also removes the plist, so it will not come back after a reboot)
-- Check for abnormal CPU use by FortiClient and similar
+- List running development services (Kafka, Redis, Elasticsearch, and so on) with their memory use. Do not stop any of them. The user decides in Phase 3; a service is stopped only after they name it, with `brew services stop <service>`
+- Check for abnormal CPU use by FortiClient and similar (report only)
 - Check services that are not running (Nginx, Docker, and so on)
 - Aggregate long-running processes: count, total memory, and uptime per process name (`ps -eo pid,rss,etime,comm`). Dozens of terminal sessions or IDE windows often pile up and hold memory
-- Find dead auto-start items: flag LaunchAgents and LaunchDaemons plists whose executable (`plutil -extract ProgramArguments.0 raw <plist>`) no longer exists. Items under `/Library` need admin rights to remove, so only report them
+- Find dead auto-start items: for each LaunchAgents and LaunchDaemons plist, read the executable with `plutil -extract ProgramArguments.0 raw <plist>` and, if that key is missing, `plutil -extract Program raw <plist>`. Flag the plist as dead only when a path was read and that file does not exist. If neither key can be read, say "cannot tell". Skip every plist that matches the security-software keywords. Report only; items under `/Library` need admin rights to remove
 
 Notes:
 - Only list user processes (terminal sessions, IDEs, and so on); end them only when the user asks. Before ending one, check that its child processes have no work in progress, and use `kill -TERM` (never `-KILL`)
 - Never change security software (Fortinet, AhnLab, Jiran, PNPSecure, Wizvera, CrossEx, and so on)
 - Keep databases the user may want, such as MySQL, by default
-- `brew services stop` removes the LaunchAgent plist, so it is safe across reboots
 
 #### Team 4: disk-analyzer (disk space)
 
@@ -135,7 +132,6 @@ Tasks:
 - Size and last-used date per app (`mdls -raw -name kMDItemLastUsedDate <app>`). Flag apps installed twice and large apps unused for more than 180 days (list only, do not delete)
 - Regenerable build output untouched for more than 30 days: `node_modules`, `.venv`, `build`, `.terraform/providers` (list only, do not delete)
 - Developer tool data: installs in `~/.npm/_npx` older than 30 days, versions in `~/.local/share/claude/versions` that are neither the link target nor running, tool folders left behind without their app (`~/.codeium` and the like), runtimes installed several times (JDK, Python)
-- List `node_modules` (list only, do not delete)
 - Large `.git` directories
 - Large disposable files such as Java hprof crash dumps
 - Xcode / Developer caches
@@ -150,7 +146,6 @@ Tasks:
 - Trash size: `du -sh ~/.Trash/ 2>/dev/null`
 - Time Machine local snapshots: `tmutil listlocalsnapshots /`
 - System Integrity Protection: `csrutil status`
-- Swap usage: `sysctl vm.swapusage`
 - Open file limits: `sysctl kern.maxfiles kern.maxfilesperproc`
 - Disk and battery health: `diskutil info / | grep SMART`, `system_profiler SPPowerDataType | grep -E "Cycle Count|Condition|Maximum Capacity"`
 - Protection status: `fdesetup status`, `spctl --status`
@@ -165,17 +160,18 @@ Notes:
 After the agents finish:
 
 1. **Java hprof files**: find them with `find ~ -maxdepth 1 -name 'java_error_in_*.hprof'` and move them to `/tmp/` (JVM crash dumps, safe to delete)
-2. **brew upgrade lock conflicts**: if a package failed, kill the stale process and retry
+2. **brew upgrade lock conflicts**: if a package failed on a lock, report it and the PID holding the lock (`pgrep -x brew`). Do not kill it
 3. **Trash**: if the Trash is large, recommend emptying it (do not empty it automatically)
-4. **Items moved to `/tmp`**: `/tmp` is on the same volume, so moving alone does not increase free space. Report the moved size and the "real free space gained" (difference in `df` before and after) separately, and ask the user whether to empty `/tmp$HOME`. When emptying, delete only the paths this run moved and leave files other work has put there
-5. **sudo commands**: give the user the DNS flush and `purge` command to run themselves
+4. **Decisions for the user**: show the lists the agents only reported (running services, Docker, stale build output, unused apps, duplicate runtimes) in one question and ask which to act on. Act only on what they pick, and apply the principles above (skip repositories with a live process; remove managed apps through their manager)
+5. **Items moved to `/tmp`**: `/tmp` is on the same volume, so moving alone does not increase free space. Report the moved size and the "real free space gained" (difference in `df` before and after) separately, and ask the user whether to empty them. When they approve, delete only the exact paths this run moved, one by one from the recorded list, and leave everything else under `/tmp$HOME` alone
+6. **sudo commands**: give the user the DNS flush and `purge` command to run themselves
    `sudo purge && sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`
-6. **macOS updates**: report the list and highlight security updates. Re-measure swap after the cleanup before recommending a restart: swap can drop on its own once memory pressure eases (10GB to under 1GB in one real run), so recommend a restart for swap only if it is still high
-7. **Post-check**: confirm nothing the user relies on broke.
+7. **macOS updates**: report the list and highlight security updates. Re-measure swap after the cleanup before recommending a restart: swap can drop on its own once memory pressure eases (10GB to under 1GB in one real run), so recommend a restart for swap only if it is still high
+8. **Post-check**: confirm nothing the user relies on broke.
    - Development commands still resolve: `for c in python3 node git docker java; do command -v $c >/dev/null || echo "missing: $c"; done`
-   - CLI launchers do not point at a removed app: `grep -l "\.app/" /usr/local/bin/* 2>/dev/null` and check that each referenced path exists
+   - CLI launchers do not point at a removed app: `find /usr/local/bin -maxdepth 1 -type f -exec grep -l "\.app/" {} +` and check that each referenced path exists (use `find`, because a glob with no match is an error in zsh)
    - Removed build output does not sit in a directory where a process is working: compare the removed paths with `lsof -a -p <pid> -d cwd -Fn` of terminal, IDE, and agent processes, and report any overlap
-8. **Re-setup list**: for everything removed, tell the user what they need to run before using it again (`terraform init`, `npm install`, recreate the virtualenv, re-pull Docker images, cold-boot the emulator)
+9. **Re-setup list**: for everything removed, tell the user what they need to run before using it again (`terraform init`, `npm install`, recreate the virtualenv, re-pull Docker images, cold-boot the emulator)
 
 ### Phase 4: Final report
 
@@ -208,17 +204,22 @@ When everything is done, write the final report in this format:
 | Free memory / swap used | X GB | Y GB |
 | Disk free | X GB | Y GB |
 
-### 5. Further recommendations (manual)
+### 5. System health
+| Check | Result |
+|-------|--------|
+| macOS updates / volume / SMART / battery / uptime | ... |
+
+### 6. Further recommendations (manual)
 | Priority | Item | Expected effect |
 |----------|------|-----------------|
 | ... | ... | ... |
 
-### 6. Before you use it again
+### 7. Before you use it again
 | Removed | Run this first |
 |---------|----------------|
 | ... | ... |
 
-### 7. Not verified
+### 8. Not verified
 - ...
 ```
 
@@ -226,10 +227,9 @@ When everything is done, write the final report in this format:
 
 ### Safe deletion
 ```bash
-# Prefer the cache manager's command
+# Prefer the cache manager's command (brew cleanup belongs to Team 2 only)
 pip cache purge
 npm cache clean --force
-brew cleanup
 
 # No manager: move to /tmp
 mkdir -p "/tmp$HOME/Library/Caches"
@@ -256,16 +256,16 @@ case "$RUN" in *"$h"*) echo "skip $h";; esac
 
 ### brew commands
 ```bash
-# Always disable auto-update
-HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade
-HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup
-HOMEBREW_NO_AUTO_UPDATE=1 brew outdated
+# Always disable auto-update, and always name the formulae to upgrade
+HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --formula
+HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --formula <names>
+HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup --prune=all
 HOMEBREW_NO_AUTO_UPDATE=1 brew doctor
 ```
 
-### Stopping a service for good
+### Stopping a service for good (only after the user names it)
 ```bash
-# brew services stop removes the plist, so it is safe across reboots
+# brew services stop removes the plist, so the service does not come back after a reboot
 brew services stop kafka
 
 # Verify
