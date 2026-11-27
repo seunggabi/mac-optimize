@@ -13,6 +13,9 @@ macOS 시스템의 리소스 사용량을 분석하고, 불필요한 파일과 �
 - **보안 SW 미변경**: 회사 보안 소프트웨어(Fortinet, AhnLab, Jiran, PNPSecure, Wizvera 등)는 절대 중지하지 않는다.
 - **병렬 실행**: 독립적인 점검/정리 작업은 반드시 병렬 에이전트로 수행하여 시간을 절약한다.
 - **Before/After 보고**: 모든 작업에 대해 이전/이후 용량을 측정하여 결과를 정량적으로 보고한다.
+- **실제 여유는 `df` 로 검증**: `du` 수치는 회수되는 공간이 아닐 수 있다. `/tmp` 로 옮긴 것은 같은 볼륨이라 그대로이고, APFS 클론(예: `/private/var/folders/*/*/X/*.code_sign_clone`, `du` 로는 수십 GB)은 원본과 블록을 공유해 지워도 여유가 늘지 않는다.
+- **근거가 엇갈리면 보고만**: 어느 쪽이 쓰이는지 근거가 서로 다르거나(예: Dock 과 CLI 스크립트가 다른 사본을 가리킴) 설정·데이터 성격인 항목은 옮기지 말고 근거와 함께 사용자에게 넘긴다.
+- **최근에 돌렸으면 재측정만**: 직전 실행이 같은 날이면 끝난 정리를 반복하지 않는다. Phase 1 을 다시 재고, 아직 안 본 영역만 에이전트에 맡긴다.
 
 ## 워크플로우
 
@@ -35,8 +38,8 @@ sysctl vm.swapusage
 # 메모리 상위 프로세스 (macOS 형식)
 ps -eo pid,rss,comm -r | head -20
 
-# CPU 상위 프로세스
-ps -eo pid,pcpu,comm -r | sort -k2 -nr | head -20
+# CPU 상위 프로세스 (ps 의 %CPU 는 프로세스 수명 평균이다. 지금 부하는 top 으로 본다)
+top -l 2 -n 10 -o cpu -stats pid,cpu,mem,command | tail -11
 
 # 캐시 디렉토리 크기
 du -sh ~/Library/Caches/*/ 2>/dev/null | sort -hr | head -15
@@ -72,6 +75,8 @@ launchctl list | grep -v "com.apple" | grep -v "^\-" | head -30
 - `~/Library/Logs` 내 30일 이상 오래된 로그 파일을 `/tmp/`로 이동
 - 브라우저 캐시 정리 (Whale, Chrome 등 - `/tmp/`로 이동)
 - JetBrains 캐시 중 안전한 항목(backup, download, temp) 정리
+- `~/Library/Logs/JetBrains` 에서 설치 버전보다 낮은 버전·미설치 제품의 로그 디렉터리를 `/tmp/`로 이동 (설치 버전은 `defaults read "<앱>/Contents/Info.plist" CFBundleShortVersionString`)
+- 사용자 임시 폴더(`getconf DARWIN_USER_TEMP_DIR`)에서 수정·접근이 모두 3일 넘고 열려 있지 않은 최상위 항목을 `/tmp/`로 이동
 - 각 작업의 이전/이후 용량 측정
 
 주의사항:
@@ -109,6 +114,7 @@ launchctl list | grep -v "com.apple" | grep -v "^\-" | head -30
 - FortiClient 등 비정상 CPU 사용 확인
 - 실행중이지 않은 서비스 상태 확인 (Nginx, Docker 등)
 - 오래 떠 있는 프로세스 집계: 같은 이름 프로세스의 개수·메모리 합계·가동 시간 (`ps -eo pid,rss,etime,comm`). 터미널 세션·IDE 창이 수십 개 쌓여 메모리를 차지하는 경우가 많다
+- 죽은 자동시작 항목 찾기: LaunchAgents·LaunchDaemons plist 의 실행 파일(`plutil -extract ProgramArguments.0 raw <plist>`)이 없는 것을 표시. `/Library` 아래는 제거에 관리자 권한이 필요하니 보고만 한다
 
 주의사항:
 - 사용자 프로세스(터미널 세션, IDE 등)는 목록만 보고하고, 종료는 사용자가 요청할 때만 한다. 종료 전 자식 프로세스에 진행 중인 작업이 없는지 확인하고 `kill -TERM` 을 쓴다 (`-KILL` 금지)
@@ -123,6 +129,9 @@ launchctl list | grep -v "com.apple" | grep -v "^\-" | head -30
 - `~/Library` 내 대용량 디렉토리 분석
 - Docker 상태 확인 (`docker system df`). 정리는 사용자가 요청할 때만 `docker system prune -a` 로 하고, 볼륨은 DB 데이터가 있을 수 있어 따로 확인받는다
 - `/tmp$HOME` 크기 확인 (이전 실행에서 옮겨 둔 것이 쌓여 있을 수 있다)
+- `/private/var/folders` 의 사용자 임시·캐시 폴더 크기 확인 (`getconf DARWIN_USER_TEMP_DIR`, `DARWIN_USER_CACHE_DIR`)
+- 앱별 크기와 마지막 사용일 (`mdls -raw -name kMDItemLastUsedDate <앱>`). 같은 앱이 두 벌 있거나 180일 넘게 안 쓴 큰 앱을 표시 (삭제하지 않고 목록만)
+- 재생성 가능한 산출물 중 30일 넘게 안 건드린 것 목록: `node_modules`, `.venv`, `build`, `.terraform/providers` (삭제하지 않고 목록만)
 - `node_modules` 목록 (삭제하지 않고 목록만)
 - 큰 `.git` 디렉토리 확인
 - Java hprof 크래시 덤프 등 불필요 대용량 파일 식별
@@ -140,6 +149,8 @@ launchctl list | grep -v "com.apple" | grep -v "^\-" | head -30
 - 시스템 무결성 보호(SIP) 상태 확인: `csrutil status`
 - 스왑 사용량 확인: `sysctl vm.swapusage`
 - 열린 파일 수 확인: `sysctl kern.maxfiles kern.maxfilesperproc`
+- 디스크·배터리 상태: `diskutil info / | grep SMART`, `system_profiler SPPowerDataType | grep -E "Cycle Count|Condition|Maximum Capacity"`
+- 보호 기능 상태: `fdesetup status`, `spctl --status`
 
 주의사항:
 - `softwareupdate --install`은 실행하지 않고 목록만 보고
