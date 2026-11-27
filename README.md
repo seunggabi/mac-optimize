@@ -40,15 +40,16 @@ It also triggers on phrases like "mac is slow", "disk cleanup", or "system check
 |---|---|
 | cache-cleaner | pip and npm caches, old logs, browser and IDE caches |
 | brew-updater | formula upgrade, autoremove, cleanup, doctor |
-| service-optimizer | brew services, long-running processes, dead auto-start items |
-| disk-analyzer | large folders, Docker, node_modules, large files (read-only) |
-| system-health | macOS updates, volume check, swap, uptime, battery (read-only) |
+| service-optimizer | brew services, long-running processes, idle agent sessions, dead auto-start items |
+| disk-analyzer | large folders, Docker, node_modules, broken virtualenvs, unused apps (read-only) |
+| system-health | macOS updates, volume checks, backup, firewall, swap, uptime, battery (read-only) |
 
 ## Safety rules
 
 - Never uses `rm -rf`. It runs a cache manager's own command or moves the target to `/tmp$HOME/...`.
 - Never touches security software (VPN, antivirus, DLP, certificate tools).
-- Does not run `sudo`, install macOS updates, upgrade casks, stop services, prune Docker, or end processes on its own. It lists them and acts only on what you pick.
+- Does not run `sudo`, install macOS updates, upgrade casks, stop services, prune Docker, or end processes on its own. It lists them and acts only on what you pick. An admin action you picked runs through a macOS password dialog.
+- Keeps the list of moved paths and the rebuild recipes in `~/.mac-optimize/rebuild/<date>/`, so they survive the reboot that empties `/tmp`.
 - `/tmp` is on the same volume, so moving files there does not free space. It asks before emptying it.
 - Free space is verified with `df`, because a `du` figure is not always reclaimable (APFS clones).
 
