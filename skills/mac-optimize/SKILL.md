@@ -16,6 +16,8 @@ A workflow that analyzes resource usage on macOS, cleans up unneeded files and s
 - **Verify real free space with `df`**: a `du` figure is not always reclaimable space. Anything moved to `/tmp` stays on the same volume, and APFS clones (for example `/private/var/folders/*/*/X/*.code_sign_clone`, which `du` reports as tens of GB) share blocks with the original, so deleting them frees nothing.
 - **Report instead of acting when evidence conflicts**: if signs disagree about which copy is in use (for example the Dock and a CLI launcher point at different copies), or the item is settings or data, do not move it. Hand it to the user with the evidence.
 - **Re-measure only when run recently**: if the last run was the same day, do not repeat finished cleanups. Re-run Phase 1 and give agents only the areas not yet examined.
+- **An old modification time does not mean unused**: a `.venv` or `node_modules` untouched for 30 days can still be executed every day. Even when the user approves deleting build output, leave out any repository that has a live process working in it (a terminal session, an IDE, a coding agent), or name those repositories and ask again.
+- **Uninstall managed apps through their manager**: an app installed by JetBrains Toolbox, Homebrew, or a similar manager should be removed with that manager. Removing the bundle by hand leaves a dead entry in the manager, and the manager may delete the CLI launcher it generated (for example `/usr/local/bin/pycharm`).
 
 ## Workflow
 
@@ -168,7 +170,12 @@ After the agents finish:
 4. **Items moved to `/tmp`**: `/tmp` is on the same volume, so moving alone does not increase free space. Report the moved size and the "real free space gained" (difference in `df` before and after) separately, and ask the user whether to empty `/tmp$HOME`. When emptying, delete only the paths this run moved and leave files other work has put there
 5. **sudo commands**: give the user the DNS flush and `purge` command to run themselves
    `sudo purge && sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`
-6. **macOS updates**: report the list and highlight security updates. If swap use is high and uptime is long, also recommend a restart
+6. **macOS updates**: report the list and highlight security updates. Re-measure swap after the cleanup before recommending a restart: swap can drop on its own once memory pressure eases (10GB to under 1GB in one real run), so recommend a restart for swap only if it is still high
+7. **Post-check**: confirm nothing the user relies on broke.
+   - Development commands still resolve: `for c in python3 node git docker java; do command -v $c >/dev/null || echo "missing: $c"; done`
+   - CLI launchers do not point at a removed app: `grep -l "\.app/" /usr/local/bin/* 2>/dev/null` and check that each referenced path exists
+   - Removed build output does not sit in a directory where a process is working: compare the removed paths with `lsof -a -p <pid> -d cwd -Fn` of terminal, IDE, and agent processes, and report any overlap
+8. **Re-setup list**: for everything removed, tell the user what they need to run before using it again (`terraform init`, `npm install`, recreate the virtualenv, re-pull Docker images, cold-boot the emulator)
 
 ### Phase 4: Final report
 
@@ -205,6 +212,14 @@ When everything is done, write the final report in this format:
 | Priority | Item | Expected effect |
 |----------|------|-----------------|
 | ... | ... | ... |
+
+### 6. Before you use it again
+| Removed | Run this first |
+|---------|----------------|
+| ... | ... |
+
+### 7. Not verified
+- ...
 ```
 
 ## Key patterns
