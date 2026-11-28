@@ -1,6 +1,6 @@
 # Team 2: brew-updater (Homebrew)
 
-This file is the body of Team 2's prompt. Core principles, Data-loss rules, and the security keyword list from SKILL.md are pasted into the same prompt; where this file seems to allow more, they win.
+This file is the body of Team 2's prompt. Core principles, Data-loss rules, and the security keyword list from SKILL.md are pasted into the same prompt, and the prompt states the scope in its first line; where this file seems to allow more, they and the scope win.
 
 Tasks:
 - List with `HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --formula` and `--cask`

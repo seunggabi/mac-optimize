@@ -23,20 +23,20 @@ The link points at the whole `skills/mac-optimize` folder, so `references/` come
 
 ```
 skills/mac-optimize/
-├── SKILL.md                    # always loaded (about 22 KB): invocation, principles, data-loss rules, phases, report format
-└── references/                 # loaded only at the step that needs it
-    ├── team-1-cache.md         # prompt body of each Phase 2 team
-    ├── team-2-brew.md
-    ├── team-3-services.md
-    ├── team-4-disk.md
-    ├── team-5-health.md
-    ├── recipes.md              # shell patterns pasted into every team prompt
-    ├── follow-up.md            # Phase 3: how to carry out each step and each pick
-    ├── post-check.md           # Phase 3 step 8
-    └── mac-ops.md              # only when mac-ops is installed
+|-- SKILL.md                    # always loaded (about 24 KB): invocation, principles, data-loss rules, phases, report format
+`-- references/                 # loaded only at the step that needs it
+    |-- team-1-cache.md         # prompt body of each Phase 2 team
+    |-- team-2-brew.md
+    |-- team-3-services.md
+    |-- team-4-disk.md
+    |-- team-5-health.md
+    |-- recipes.md              # shell patterns pasted into every team prompt
+    |-- follow-up.md            # Phase 3: how to carry out each step and each pick
+    |-- post-check.md           # Phase 3 step 8
+    `-- mac-ops.md              # only when mac-ops is installed
 ```
 
-Every rule that prevents data loss stays in `SKILL.md` itself, in the Core principles and the Data-loss rules block.
+Every rule that prevents data loss is in `SKILL.md` itself, in the Core principles and the Data-loss rules block. The reference files repeat some of them at the step where they apply, and otherwise hold only the details of actions that cannot be reached without reading them (a team's tasks, the recipe for a pick).
 
 ## Command usage
 

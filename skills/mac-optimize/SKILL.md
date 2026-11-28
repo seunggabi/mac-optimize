@@ -14,7 +14,7 @@ The text after `/mac-optimize`, or the request that triggered the skill, sets th
 - **Nothing**: the full workflow
 - **`help` or `usage`** (or the same request in Korean): print the usage summary below and stop. Run nothing that changes the machine
 - **A focus word**: Phase 1, then only the matching team, then Phase 3 and Phase 4 for that scope. `disk` is Teams 1 and 4, `memory` and `services` are Team 3, `brew` is Team 2, and `security` or `health` is Team 5. `score` runs Phase 1 and all five teams with every cleanup task removed, then prints only the section 9 score table and what blocks a higher score
-- **`report` or `dry-run`**: Phase 1 and all five teams with every cleanup task removed from their prompts (no purge, move, upgrade, cleanup, or autoremove: they list what they would do), then the Phase 4 report. No Phase 3 picks
+- **`report` or `dry-run`**: Phase 1 and all five teams with every cleanup task removed from their prompts (no purge, move, upgrade, cleanup, or autoremove: they list what they would do), then the Phase 4 report. No Phase 3 picks and no Phase 3 step that changes the machine
 - **Anything else**: a free-text request. Say how you read it in one line. If it is a question or asks for documentation rather than a cleanup, answer it and start no cleanup
 
 A second run on the same day follows "Re-measure only when run recently", whatever the arguments.
@@ -75,17 +75,20 @@ Processes:
 - **Before any signal**: re-check that the PID still exists and is still the same command (`ps -o command= -p <pid>`) right before sending it. Sessions listed minutes earlier can be gone or replaced (two were, in one run)
 - Match processes by executable (`ps -eo comm | grep -i <name>`), not by full command line. `pgrep -f zoom` matched an Electron app whose arguments contain `popoutZoom`, and `pgrep -f android` matched `androidEmulator` in the same arguments
 - Never end the session running this skill or its ancestors (walk up the parent links from the current shell's PID). End only the session root PIDs the user names: "idle" is the user's call. Leave sessions started within the last day unless the user names them
-- Quit Docker Desktop only when `docker ps -q` lists no container, with the recipe in `references/follow-up.md`. Never force-quit an app
+- Quit Docker Desktop only when `docker ps -q` succeeds and lists no container, with the recipe in `references/follow-up.md`. If `docker ps -q` fails, the container count is unknown: ask the user instead of quitting or killing. Never force-quit an app
 - Run `redis-cli save` before stopping Redis. Keep databases the user may want, such as MySQL, by default
 
 Docker, keychain, secrets:
-- Never add `--volumes` to a prune and never run `docker volume prune`: volumes may hold database data. `until` filters on the image creation date, so an old image pulled today is pruned too
+- Never add `--volumes` to a prune and never run `docker volume prune`: volumes may hold database data. `until` filters on the image creation date, so an old image pulled today is pruned too. Prune images and build cache only with `--filter "until=720h"` (`docker image prune -a --filter "until=720h" -f`, `docker builder prune --filter "until=720h" -f`): without the filter, `-a` also deletes local builds that were never pushed
 - Keychain: never run `security dump-keychain -d` (it prints secrets). Delete only the entries the user picks, always with `-a <account>` (without it the first match is deleted). Deletion cannot be undone; say so in the question
-- Never print a secret's value: mask it with `sed` before it reaches the output. A backup of an edited startup file holds `<removed>` in place of the value, never a copy that still holds the secret. Check the edited file with `zsh -n` before replacing the original
+- Delete a plaintext secret's line only after the user says it is no longer used; if it is still used, only report it. Never print a secret's value: mask it with `sed` before it reaches the output. A backup of an edited startup file holds `<removed>` in place of the value, never a copy that still holds the secret. Check the edited file with `zsh -n` before replacing the original
 
 Other tools and admin actions:
-- **mac-ops, never without a pick**: `mac-ops run` (it also purges expired trash), `purge`, `restore`, `install`, `uninstall`. Never delete `~/.mac-ops/.trash` by hand
+- **mac-ops, never without a pick**: `mac-ops run` without `--dry-run` (it also purges expired trash), `purge`, `restore`, `install`, `uninstall`. The preview `mac-ops run --dry-run` and the read-only `status`, `config`, `runs`, `list-trash` are allowed. Never delete `~/.mac-ops/.trash` by hand
 - Never run a cleaner's test suite or scripts on this machine to check it: a test whose scan roots are not pointed at fixtures runs a real cleanup. Start a scheduled job with `launchctl kickstart` only when the user picks it: it runs a real cleanup and purges expired trash
+- Never trust a third-party tap: `brew trust` only for a tap the user owns and picks. Stop a scheduled cleaner with the tool's own command (for example `<tool> uninstall`), not `launchctl` by hand
+- Java hprof crash dumps: only the files `find ~ -maxdepth 1 -name 'java_error_in_*.hprof'` lists
+- Keychain leftovers: collect the list only when the user asks for it; offer only entries of apps that are no longer installed and put everything else under "confirm"; saved Wi-Fi passwords are removed from the known-networks list in System Settings, not from the keychain
 - Remove a dead auto-start item only after checking that its app is absent and nothing of it is running. Move a broken launcher symlink only when it is both `-L` and not `-e`. Flag an auto-start item as dead only when a program path was read and that file does not exist
 - Security software, admin rights, restores, and virtualenvs follow Core principles: never touch security software (keywords at the end of this file); use the password dialog only for what the user picked; compare before restoring; move a virtualenv only with its recorded package list
 
@@ -148,11 +151,11 @@ Summarize the diagnosis for the user as tables:
 Launch 5 agents **at the same time** in the background.
 
 An agent sees only the prompt you write for it, so a team prompt is built from files, never from the one-line purposes below. Right before launching team N, read its file and build the prompt from, in this order:
-1. the whole of `references/team-N-*.md` (table below)
+1. a first line stating the scope from Invocation (full, a focus word, `report`, `dry-run`, or `score`), then the whole of `references/team-N-*.md` (table below), minus every task that changes the machine when the scope is `report`, `dry-run`, or `score`
 2. Core principles and Data-loss rules from this file
 3. the security keyword list (end of this file)
-4. the whole of `references/recipes.md`
-5. the scope from Invocation (for `report`, `dry-run`, and `score`, remove every cleanup task and say so in the prompt), and a hard limit for the final report
+4. the whole of `references/recipes.md`; for `report`, `dry-run`, and `score`, preceded by the line "These recipes are reference only: run none of them."
+5. a hard limit for the final report
 
 If a team file cannot be read, do not launch that team; say which file is missing.
 
@@ -168,7 +171,7 @@ Give every agent a hard limit for its final report (for example "under 600 words
 
 ### Phase 3: Collect results and follow up
 
-After the agents finish, read `references/follow-up.md` before step 1. The lines below give the order; that file says how to carry out each step, and a step is done only when it is done as written there.
+After the agents finish (or at once on a same-day run that launches no team), read `references/follow-up.md` and `references/recipes.md` before step 1; every move in Phase 3 uses the collision-safe pattern in `recipes.md`. The lines below give the order; that file says how to carry out each step, and a step is done only when it is done as written there.
 
 1. **Java hprof files**: move JVM crash dumps in the home directory to `/tmp/`
 2. **brew upgrade lock conflicts**: report the PID holding the lock; do not kill it
@@ -245,6 +248,8 @@ What blocks a higher score, and who has to do it:
 ```
 
 The weights in section 9 are fixed; do not change them between runs. Under the table, name each thing that blocks a higher score and who has to do it (for example: no backup destination needs an external disk from the user; an OS update needs a restart). Some points cannot be earned by the skill at all: in one run three of the missing points were of that kind.
+
+Recommending mac-ops in section 6: recommend installing it when the caches and logs this run cleaned will grow back, the user wants that upkeep without asking, and no other scheduled cleaner is active (two cleaners make every finding ambiguous). Give the steps: `brew install seunggabi/tap/mac-ops`, `mac-ops run --dry-run` and read the list, then `mac-ops install`. By default it moves only caches, temp files, logs, and the caches and saved window state of removed apps; their settings and data folders are reported, not moved
 
 ## Security software keywords
 

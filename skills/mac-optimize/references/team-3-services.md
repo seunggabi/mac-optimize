@@ -1,6 +1,6 @@
 # Team 3: service-optimizer (services)
 
-This file is the body of Team 3's prompt. Core principles, Data-loss rules, and the security keyword list from SKILL.md are pasted into the same prompt; where this file seems to allow more, they win.
+This file is the body of Team 3's prompt. Core principles, Data-loss rules, and the security keyword list from SKILL.md are pasted into the same prompt, and the prompt states the scope in its first line; where this file seems to allow more, they and the scope win.
 
 Tasks:
 - Check status with `brew services list`
