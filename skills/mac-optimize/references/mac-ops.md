@@ -1,0 +1,9 @@
+# Companion tool: mac-ops
+
+Read this file when `command -v mac-ops` succeeds or Team 3 finds `com.mac-ops.cleanup`. The mac-ops commands that never run without a pick are in the Data-loss rules of SKILL.md.
+
+[mac-ops](https://github.com/seunggabi/mac-ops) does the unattended side of this job: a Homebrew CLI whose LaunchAgent cleans caches, temp files, logs, and leftovers of removed apps every hour, into its own trash with a 72-hour restore. This skill is the interactive pass: diagnosis, decisions, and anything that needs the user.
+
+- **When it is installed** (`command -v mac-ops`, or Team 3 finds `com.mac-ops.cleanup`): read `mac-ops version` first; `runs`, `restore --run`, and the health lines of `status` exist from 1.5.0. In Phase 1 run `mac-ops status` (read-only; an `[ALERT]` first line means the last scheduled run failed or is overdue, and a BROKEN or STALE agent line comes with the command that fixes it) and `mac-ops config` (every setting with its source). Report every setting that moves settings or ends processes: `DataAction` set to `trash`, an `Action` set to `term` or `prune`, or the `brew` module enabled
+- **Undoing one of its runs**: `mac-ops runs` lists each run with how many settings and app-data items it moved. After "Compare before restoring", and only for what the user picks: `mac-ops restore --run <run-id> --dry-run`, then the same without `--dry-run`
+- **When to recommend installing it** (Phase 4, further recommendations): the caches and logs this run cleaned will grow back, the user wants that upkeep without asking, and no other scheduled cleaner is active (two cleaners make every finding ambiguous). Give the steps: `brew install seunggabi/tap/mac-ops`, `mac-ops run --dry-run` and read the list, then `mac-ops install`. By default it moves only caches, temp files, logs, and the caches and saved window state of removed apps; their settings and data folders are reported, not moved
