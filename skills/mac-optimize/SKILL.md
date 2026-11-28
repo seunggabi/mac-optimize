@@ -7,6 +7,30 @@ description: "Full macOS system check and cleanup. Analyzes memory, CPU, and dis
 
 A workflow that analyzes resource usage on macOS, cleans up unneeded files and services, and reports the result with before/after numbers.
 
+## Invocation
+
+The text after `/mac-optimize`, or the request that triggered the skill, sets the scope. Decide it before Phase 1 and state it in one line.
+
+- **Nothing**: the full workflow
+- **`help` or `usage`** (or the same request in Korean): print the usage summary below and stop. Run nothing that changes the machine
+- **A focus word**: Phase 1, then only the matching team, then Phase 3 and Phase 4 for that scope. `disk` is Teams 1 and 4, `memory` and `services` are Team 3, `brew` is Team 2, and `security` or `health` is Team 5. `score` runs Phase 1 and all five teams with every cleanup task removed, then prints only the section 9 score table and what blocks a higher score
+- **`report` or `dry-run`**: Phase 1 and all five teams with every cleanup task removed from their prompts (no purge, move, upgrade, cleanup, or autoremove: they list what they would do), then the Phase 4 report. No Phase 3 picks
+- **Anything else**: a free-text request. Say how you read it in one line. If it is a question or asks for documentation rather than a cleanup, answer it and start no cleanup
+
+A second run on the same day follows "Re-measure only when run recently", whatever the arguments.
+
+Usage summary:
+```
+/mac-optimize              diagnose, five parallel teams, your picks, report with a 100-point score
+/mac-optimize <focus>      disk | memory | brew | services | security | health | score
+/mac-optimize report       diagnose and report only, change nothing (same: dry-run)
+/mac-optimize help         this summary
+Asks before: stopping services, Docker cleanup, ending agent sessions, removing build
+output or apps, admin actions, emptying what it moved to /tmp
+Records: ~/.mac-optimize/rebuild/<YYYYMMDD>/ (moved paths, rebuild recipes)
+Unattended hourly cleanup: mac-ops (https://github.com/seunggabi/mac-ops)
+```
+
 ## Core principles
 
 - **Safety first**: never use `rm -rf` on an original location. Prefer a cache manager's own purge/clean command; otherwise move the target to `/tmp/`. A moved item stays recoverable only until `/tmp` is cleaned (a reboot, or macOS purging old files after about 3 days). The one allowed deletion is emptying paths this run already moved under `/tmp`, after the user approves.
