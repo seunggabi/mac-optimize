@@ -53,6 +53,14 @@ It also triggers on phrases like "mac is slow", "disk cleanup", or "system check
 - `/tmp` is on the same volume, so moving files there does not free space. It asks before emptying it.
 - Free space is verified with `df`, because a `du` figure is not always reclaimable (APFS clones).
 
+## Related
+
+[mac-ops](https://github.com/seunggabi/mac-ops) is the companion tool for unattended upkeep: a zsh CLI that cleans caches, temp files, logs, and leftovers of removed apps every hour from launchd, into its own trash with a 72-hour restore. This skill does the interactive part: a one-off diagnosis, the decisions only you can make, and a before/after report. When mac-ops is installed, the skill reads its status, settings, and run history, and recommends installing it when you want the cleanup to keep happening without asking.
+
+```bash
+brew install seunggabi/tap/mac-ops
+```
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=seunggabi/mac-optimize&type=Date)](https://star-history.com/#seunggabi/mac-optimize&Date)
