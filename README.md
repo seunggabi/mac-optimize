@@ -17,6 +17,27 @@ mkdir -p ~/.claude/skills
 ln -s "$(pwd)/mac-optimize/skills/mac-optimize" ~/.claude/skills/mac-optimize
 ```
 
+The link points at the whole `skills/mac-optimize` folder, so `references/` comes with it. When copying by hand, copy the folder, not `SKILL.md` alone.
+
+### Layout
+
+```
+skills/mac-optimize/
+├── SKILL.md                    # always loaded (about 22 KB): invocation, principles, data-loss rules, phases, report format
+└── references/                 # loaded only at the step that needs it
+    ├── team-1-cache.md         # prompt body of each Phase 2 team
+    ├── team-2-brew.md
+    ├── team-3-services.md
+    ├── team-4-disk.md
+    ├── team-5-health.md
+    ├── recipes.md              # shell patterns pasted into every team prompt
+    ├── follow-up.md            # Phase 3: how to carry out each step and each pick
+    ├── post-check.md           # Phase 3 step 8
+    └── mac-ops.md              # only when mac-ops is installed
+```
+
+Every rule that prevents data loss stays in `SKILL.md` itself, in the Core principles and the Data-loss rules block.
+
 ## Command usage
 
 Type `/mac-optimize`, or just describe the problem: phrases such as "mac is slow", "disk cleanup", "out of memory", "clear cache" or "system check" start it too, and so do the Korean ones in [SKILL.md](skills/mac-optimize/SKILL.md) (for example 맥 느려, 디스크 정리, 시스템 점검).
